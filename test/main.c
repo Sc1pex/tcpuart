@@ -14,7 +14,7 @@ int main() {
 
     struct in_addr addr;
     inet_pton(AF_INET, "127.0.0.1", &addr);
-    struct tcpuart_connect_to conn = { .addr = addr.s_addr, .port = 15113 };
+    struct tcpuart_connect_to conn = { .addr = addr.s_addr, .port = htons(15113) };
     ioctl(fd, TCPUART_CONNECT_TO, &conn);
 
     printf("sent ioctl to device");
