@@ -1,0 +1,45 @@
+CompileFlags:
+  Remove:
+    # GCC-specific x86 flags
+    - -mno-sse4a
+    - -mskip-rax-setup
+    - -mno-80387
+    - -mno-fp-ret-in-387
+    - -mpreferred-stack-boundary=*
+    - -mstack-protector-guard-reg=*
+    - -mstack-protector-guard-symbol=*
+    - -mindirect-branch=*
+    - -mindirect-branch-register
+    - -mindirect-branch-cs-prefix
+    - -mfunction-return=*
+    - -mharden-sls=*
+    - -mrecord-mcount
+    - -mfentry
+    # GCC-specific code gen flags
+    - -fno-allow-store-data-races
+    - -fzero-init-padding-bits=*
+    - -fno-inline-functions-called-once
+    - -fmin-function-alignment=*
+    - -fstrict-flex-arrays=*
+    - -fno-builtin-wcslen
+    - -fconserve-stack
+    - -fpatchable-function-entry=*
+    - -falign-jumps=*
+    - -falign-loops=*
+    # GCC-specific warnings
+    - -Wno-dangling-pointer
+    - -Wno-unterminated-string-initialization
+    - -Wno-alloc-size-larger-than
+    - -Wno-override-init
+    - -Wno-maybe-uninitialized
+    - -Wno-format-overflow
+    - -Wno-format-truncation
+    - -Wno-stringop-truncation
+    - -Wno-stringop-overflow
+    - -Wcast-function-type
+    - -Wimplicit-fallthrough=*
+    - -Wframe-larger-than=*
+    - -Wvla-larger-than=*
+    # GCC debug/sanitize flags clang doesn't like in this form
+    - -gz=*
+    - -fsanitize=bounds-strict
