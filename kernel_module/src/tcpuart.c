@@ -96,11 +96,6 @@ static long handle_ctl_ioctl(struct file* file, unsigned int cmd, unsigned long 
     }
 }
 
-static struct file_operations ctl_fops = {
-    .owner = THIS_MODULE,
-    .unlocked_ioctl = handle_ctl_ioctl,
-};
-
 static char* tcpuart_devnode(const struct device* dev, umode_t* mode) {
     if (mode) {
         *mode = 0666;
@@ -116,7 +111,7 @@ static int __init tcpuart_init(void) {
     state.tcpuart_class = class_create("tcpuart");
     state.tcpuart_class->devnode = tcpuart_devnode;
 
-    cdev_init(&state.ctl_cdev, &ctl_fops);
+    cdev_init(&state.ctl_cdev, &state.ctl_fops);
     cdev_add(&state.ctl_cdev, state.base_dev_num, 1);
     device_create(state.tcpuart_class, NULL, state.base_dev_num, NULL, "tcpuart0");
 

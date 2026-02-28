@@ -4,7 +4,7 @@ build-module:
 
 [working-directory: 'kernel_module']
 insert-module: build-module
-    sudo rmmod tcpuart
+    -sudo rmmod tcpuart
     sudo insmod tcpuart.ko
 
 log:
