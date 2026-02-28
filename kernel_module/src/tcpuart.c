@@ -88,7 +88,7 @@ static long handle_ctl_ioctl(struct file* file, unsigned int cmd, unsigned long 
             ntohs(conn_cmd.port)
         );
 
-        return 0;
+        return conn->minor;
     }
 
     default:
@@ -103,9 +103,52 @@ static char* tcpuart_devnode(const struct device* dev, umode_t* mode) {
     return NULL;
 }
 
+static ssize_t conn_read(struct file* file, char __user* buf, size_t count, loff_t* ppos) {
+    struct connection* conn = file->private_data;
+    if (!conn) {
+        return -ENODEV;
+    }
+
+    pr_info("Reading from connection %d\n", conn->minor);
+    return 0;
+}
+
+static ssize_t conn_write(struct file* file, const char __user* buf, size_t count, loff_t* ppos) {
+    struct connection* conn = file->private_data;
+    if (!conn) {
+        return -ENODEV;
+    }
+
+    pr_info("Writing to connection %d\n", conn->minor);
+    return 0;
+}
+
+static int conn_open(struct inode* inode, struct file* file) {
+    int minor = iminor(inode);
+    struct connection* conn = state.conns[minor - 1];
+    if (!conn) {
+        return -ENODEV;
+    }
+
+    pr_info("Opened connection %d\n", minor);
+    file->private_data = conn;
+    return 0;
+}
+
+static int conn_release(struct inode* inode, struct file* file) {
+    file->private_data = NULL;
+    return 0;
+}
+
 static int __init tcpuart_init(void) {
     state.ctl_fops.owner = THIS_MODULE;
     state.ctl_fops.unlocked_ioctl = handle_ctl_ioctl;
+
+    state.conn_fops.owner = THIS_MODULE;
+    state.conn_fops.write = conn_write;
+    state.conn_fops.read = conn_read;
+    state.conn_fops.open = conn_open;
+    state.conn_fops.release = conn_release;
 
     alloc_chrdev_region(&state.base_dev_num, 0, MAX_DEVICES, "tcpuart");
     state.tcpuart_class = class_create("tcpuart");

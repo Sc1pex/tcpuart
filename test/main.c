@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <unistd.h>
 #include "tcpuart.h"
 
 int main() {
@@ -15,7 +16,20 @@ int main() {
     struct in_addr addr;
     inet_pton(AF_INET, "127.0.0.1", &addr);
     struct tcpuart_connect_to conn = { .addr = addr.s_addr, .port = htons(15113) };
-    ioctl(fd, TCPUART_CONNECT_TO, &conn);
+    int fileid = ioctl(fd, TCPUART_CONNECT_TO, &conn);
 
-    printf("sent ioctl to device");
+    char filename[64];
+    snprintf(filename, 64, "/dev/tcpuart%d", fileid);
+
+    printf("Created node: %s\n", filename);
+
+    int connfd = open(filename, O_RDWR);
+    char buf[64];
+    int n = read(connfd, buf, 64);
+    printf("read %d bytes\n", n);
+
+    n = write(connfd, buf, 12);
+    printf("wrote %d bytes\n", n);
+
+    close(connfd);
 }
