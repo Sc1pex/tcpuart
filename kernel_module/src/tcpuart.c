@@ -8,8 +8,22 @@
 #include <linux/module.h>
 
 static long handle_ioctl(struct file* file, unsigned int cmd, unsigned long arg) {
-    pr_info("Got ioctl: %d\n", cmd);
-    return 0;
+    switch (cmd) {
+    case TCPUART_CONNECT_TO: {
+        struct tcpuart_connect_to conn;
+        pr_info("Handling TCPUART_CONNECT_TO ioctl\n");
+        pr_info("arg: %lu\n", arg);
+        if (copy_from_user(&conn, (void __user*) arg, sizeof(conn))) {
+            pr_err("failed to copy data from user\n");
+            return -EFAULT;
+        }
+
+        pr_info("Received connect request to %pI4:%d\n", &conn.addr, ntohs(conn.port));
+        return 0;
+    }
+    default:
+        return -EINVAL;
+    }
 }
 
 static struct file_operations fops = {

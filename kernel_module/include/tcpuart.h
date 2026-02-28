@@ -1,3 +1,6 @@
+#ifndef _TCPUART_H
+#define _TCPUART_H
+
 #include <linux/ioctl.h>
 
 #ifdef __KERNEL__
@@ -14,3 +17,5 @@ struct tcpuart_connect_to {
 };
 
 #define TCPUART_CONNECT_TO _IOW(TCPUART_MAGIC, 0, struct tcpuart_connect_to)
+
+#endif
