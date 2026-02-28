@@ -7,7 +7,17 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 
-static long handle_ioctl(struct file* file, unsigned int cmd, unsigned long arg) {
+struct tcpuart_state {
+    dev_t base_dev_num;
+    struct class* tcpuart_class;
+    struct cdev ctl_cdev;
+
+    struct file_operations ctl_fops;
+};
+
+static struct tcpuart_state state;
+
+static long handle_ctl_ioctl(struct file* file, unsigned int cmd, unsigned long arg) {
     switch (cmd) {
     case TCPUART_CONNECT_TO: {
         struct tcpuart_connect_to conn;
@@ -26,14 +36,10 @@ static long handle_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
     }
 }
 
-static struct file_operations fops = {
+static struct file_operations ctl_fops = {
     .owner = THIS_MODULE,
-    .unlocked_ioctl = handle_ioctl,
+    .unlocked_ioctl = handle_ctl_ioctl,
 };
-
-static dev_t dev_num;
-static struct class* tcpuart_class;
-static struct cdev tcpuart_cdev;
 
 static char* tcpuart_devnode(const struct device* dev, umode_t* mode) {
     if (mode) {
@@ -43,22 +49,25 @@ static char* tcpuart_devnode(const struct device* dev, umode_t* mode) {
 }
 
 static int __init tcpuart_init(void) {
-    alloc_chrdev_region(&dev_num, 0, 1, "tcpuart");
-    tcpuart_class = class_create("tcpuart");
-    tcpuart_class->devnode = tcpuart_devnode;
+    state.ctl_fops.owner = THIS_MODULE;
+    state.ctl_fops.unlocked_ioctl = handle_ctl_ioctl;
 
-    device_create(tcpuart_class, NULL, dev_num, NULL, "tcpuart0");
-    cdev_init(&tcpuart_cdev, &fops);
-    cdev_add(&tcpuart_cdev, dev_num, 1);
+    alloc_chrdev_region(&state.base_dev_num, 0, 1, "tcpuart");
+    state.tcpuart_class = class_create("tcpuart");
+    state.tcpuart_class->devnode = tcpuart_devnode;
+
+    device_create(state.tcpuart_class, NULL, state.base_dev_num, NULL, "tcpuart0");
+    cdev_init(&state.ctl_cdev, &ctl_fops);
+    cdev_add(&state.ctl_cdev, state.base_dev_num, 1);
 
     return 0;
 }
 
 static void __exit tcpuart_exit(void) {
-    cdev_del(&tcpuart_cdev);
-    device_destroy(tcpuart_class, dev_num);
-    class_destroy(tcpuart_class);
-    unregister_chrdev_region(dev_num, 1);
+    cdev_del(&state.ctl_cdev);
+    device_destroy(state.tcpuart_class, state.base_dev_num);
+    class_destroy(state.tcpuart_class);
+    unregister_chrdev_region(state.base_dev_num, 1);
 }
 
 module_init(tcpuart_init);
