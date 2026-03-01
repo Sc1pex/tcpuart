@@ -1,6 +1,7 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -28,7 +29,8 @@ int main() {
     int n = read(connfd, buf, 64);
     printf("read %d bytes\n", n);
 
-    n = write(connfd, buf, 12);
+    strcpy(buf, "abcdef");
+    n = write(connfd, buf, 6);
     printf("wrote %d bytes\n", n);
 
     close(connfd);
