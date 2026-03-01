@@ -18,6 +18,9 @@ struct connection {
     int minor;
 
     struct socket* sock;
+
+    uint8_t read_data_buf[MAXIMUM_MESSAGE_SIZE];
+    size_t read_data_buf_len;
 };
 
 struct tcpuart_state {
@@ -136,8 +139,52 @@ static ssize_t conn_read(struct file* file, char __user* buf, size_t count, loff
         return -ENODEV;
     }
 
-    pr_info("Reading from connection %d\n", conn->minor);
-    return 0;
+    // First check if there is data left in the conn buffer
+    if (conn->read_data_buf_len) {
+        pr_info("Sending left ovevr data\n");
+        size_t send_cnt = min(count, conn->read_data_buf_len);
+        if (copy_to_user(buf, conn->read_data_buf, send_cnt)) {
+            return -EFAULT;
+        }
+
+        memmove(
+            conn->read_data_buf, conn->read_data_buf + send_cnt, conn->read_data_buf_len - send_cnt
+        );
+        conn->read_data_buf_len -= send_cnt;
+
+        return send_cnt;
+    }
+
+    int noblock = file->f_flags & O_NONBLOCK;
+
+    // No data in the buffer read from socket until we get a data message
+    struct MessageHeader hdr;
+    do {
+        pr_info("Reading from socket\n");
+        int ret = recv_message(&hdr, conn->read_data_buf, conn->sock, noblock);
+        if (ret) {
+            if (ret == -EAGAIN) {
+                return -EAGAIN;
+            }
+
+            pr_err("Failed to receive message: %d\n", ret);
+            return ret < 0 ? ret : -EFAULT;
+        }
+        conn->read_data_buf_len = hdr.size;
+    } while (hdr.kind != MESSAGE_KIND_DATA);
+
+    pr_info("Received data message of size: %zu\n", conn->read_data_buf_len);
+    size_t send_cnt = min(count, conn->read_data_buf_len);
+    if (copy_to_user(buf, conn->read_data_buf, send_cnt)) {
+        return -EFAULT;
+    }
+
+    memmove(
+        conn->read_data_buf, conn->read_data_buf + send_cnt, conn->read_data_buf_len - send_cnt
+    );
+    conn->read_data_buf_len -= send_cnt;
+
+    return send_cnt;
 }
 
 static ssize_t conn_write(struct file* file, const char __user* buf, size_t count, loff_t* ppos) {
@@ -166,12 +213,7 @@ static ssize_t conn_write(struct file* file, const char __user* buf, size_t coun
         int ret = send_message(hdr, kbuf, conn->sock);
         if (ret) {
             pr_err("Failed to send message: %d\n", ret);
-
-            if (ret < 0) {
-                return ret;
-            } else {
-                return -EFAULT;
-            }
+            return ret < 0 ? ret : -EFAULT;
         }
     }
 

@@ -21,6 +21,8 @@ struct MessageHeader {
 #define MESSAGE_ERROR_INVALID_SIZE 2
 
 int send_message(struct MessageHeader header, uint8_t* content, struct socket* socket);
-int recv_message(struct MessageHeader* header, uint8_t* content, struct socket* socket);
+int recv_message(
+    struct MessageHeader* header, uint8_t* content, struct socket* socket, int noblock
+);
 
 #endif
