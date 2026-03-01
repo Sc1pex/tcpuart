@@ -7,6 +7,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <net/sock.h>
+#include "message.h"
 
 #define MAX_DEVICES 16
 #define MAX_CONNS (MAX_DEVICES - 1)
@@ -32,8 +33,8 @@ struct tcpuart_state {
 
 static struct tcpuart_state state;
 
-static int create_tcp_socket(struct socket* sock, uint32_t addr, uint16_t port) {
-    int rc = sock_create_kern(&init_net, AF_INET, SOCK_STREAM, IPPROTO_TCP, &sock);
+static int create_tcp_socket(struct socket** sock, uint32_t addr, uint16_t port) {
+    int rc = sock_create_kern(&init_net, AF_INET, SOCK_STREAM, IPPROTO_TCP, sock);
     if (rc) {
         return rc;
     }
@@ -44,8 +45,10 @@ static int create_tcp_socket(struct socket* sock, uint32_t addr, uint16_t port) 
         .sin_port = port,
     };
 
-    rc = kernel_connect(sock, (struct sockaddr*) &saddr, sizeof(saddr), 0);
+    rc = kernel_connect(*sock, (struct sockaddr*) &saddr, sizeof(saddr), 0);
     if (rc) {
+        sock_release(*sock);
+        sock = NULL;
         return rc;
     }
 
@@ -82,7 +85,7 @@ static long handle_ctl_ioctl(struct file* file, unsigned int cmd, unsigned long 
         conn->minor = conn_idx + 1;
 
         // Try to connect to the socket
-        int rc = create_tcp_socket(conn->sock, conn_cmd.addr, conn_cmd.port);
+        int rc = create_tcp_socket(&conn->sock, conn_cmd.addr, conn_cmd.port);
         if (rc) {
             pr_err("failed to connect to tcp server\n");
             kfree(conn);
@@ -143,8 +146,36 @@ static ssize_t conn_write(struct file* file, const char __user* buf, size_t coun
         return -ENODEV;
     }
 
-    pr_info("Writing to connection %d\n", conn->minor);
-    return 0;
+    char kbuf[MAXIMUM_MESSAGE_SIZE];
+    size_t written_cnt = 0;
+
+    while (count) {
+        size_t copy_cnt = min(count, MAXIMUM_MESSAGE_SIZE);
+        count -= copy_cnt;
+        written_cnt += copy_cnt;
+
+        if (copy_from_user(kbuf, buf, copy_cnt)) {
+            return -EFAULT;
+        }
+
+        struct MessageHeader hdr = {
+            .kind = MESSAGE_KIND_DATA,
+            .size = copy_cnt,
+        };
+
+        int ret = send_message(hdr, kbuf, conn->sock);
+        if (ret) {
+            pr_err("Failed to send message: %d\n", ret);
+
+            if (ret < 0) {
+                return ret;
+            } else {
+                return -EFAULT;
+            }
+        }
+    }
+
+    return written_cnt;
 }
 
 static int conn_open(struct inode* inode, struct file* file) {
