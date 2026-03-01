@@ -12,7 +12,9 @@
 #define TCPUART_MAGIC 'T'
 
 struct tcpuart_connect_to {
+    // Network byte order
     uint32_t addr;
+    // Network byte order
     uint16_t port;
 };
 

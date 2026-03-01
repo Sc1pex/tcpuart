@@ -1,14 +1,12 @@
-#include "asm-generic/errno-base.h"
-#include "linux/err.h"
-#include "linux/gfp_types.h"
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#include "tcpuart.h"
 #include <linux/cdev.h>
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include "tcpuart.h"
+#include <net/sock.h>
 
 #define MAX_DEVICES 16
 #define MAX_CONNS (MAX_DEVICES - 1)
@@ -16,9 +14,9 @@
 struct connection {
     struct cdev cdev;
     struct device* device;
-    uint32_t addr;
-    uint16_t port;
     int minor;
+
+    struct socket* sock;
 };
 
 struct tcpuart_state {
@@ -33,6 +31,26 @@ struct tcpuart_state {
 };
 
 static struct tcpuart_state state;
+
+static int create_tcp_socket(struct socket* sock, uint32_t addr, uint16_t port) {
+    int rc = sock_create_kern(&init_net, AF_INET, SOCK_STREAM, IPPROTO_TCP, &sock);
+    if (rc) {
+        return rc;
+    }
+
+    struct sockaddr_in saddr = {
+        .sin_family = AF_INET,
+        .sin_addr.s_addr = addr,
+        .sin_port = port,
+    };
+
+    rc = kernel_connect(sock, (struct sockaddr*) &saddr, sizeof(saddr), 0);
+    if (rc) {
+        return rc;
+    }
+
+    return 0;
+}
 
 static long handle_ctl_ioctl(struct file* file, unsigned int cmd, unsigned long arg) {
     switch (cmd) {
@@ -60,10 +78,16 @@ static long handle_ctl_ioctl(struct file* file, unsigned int cmd, unsigned long 
             return -ENOMEM;
         }
 
-        conn->addr = conn_cmd.addr;
-        conn->port = conn_cmd.port;
         // +1 for the ctl device
         conn->minor = conn_idx + 1;
+
+        // Try to connect to the socket
+        int rc = create_tcp_socket(conn->sock, conn_cmd.addr, conn_cmd.port);
+        if (rc) {
+            pr_err("failed to connect to tcp server\n");
+            kfree(conn);
+            return rc;
+        }
 
         dev_t new_dev = MKDEV(MAJOR(state.base_dev_num), conn->minor);
         cdev_init(&conn->cdev, &state.conn_fops);
