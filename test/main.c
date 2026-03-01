@@ -15,7 +15,7 @@ int main() {
     }
 
     struct in_addr addr;
-    inet_pton(AF_INET, "127.0.0.1", &addr);
+    inet_pton(AF_INET, "192.168.0.97", &addr);
     struct tcpuart_connect_to conn = { .addr = addr.s_addr, .port = htons(15113) };
     int fileid = ioctl(fd, TCPUART_CONNECT_TO, &conn);
 
