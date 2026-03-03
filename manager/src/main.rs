@@ -13,8 +13,8 @@ enum Commands {
     /// Create a new device and connect it
     Connect { addr: String, port: u16 },
 
-    /// Disconnect the specified device
-    Disconnect { device: String },
+    /// Disconnect the device with the specified minor number
+    Disconnect { minor: u64 },
 
     /// Get the server ip and port of the specified device
     GetServer { device: String },
@@ -54,24 +54,45 @@ fn connect_device(addr: String, port: u16) -> std::io::Result<()> {
                 "Ioctl failed",
             ));
         }
+        _ => unreachable!(),
     };
 
     println!("Created device /dev/tcpuart{minor}");
     Ok(())
 }
 
+fn disconnect_device(minor: u64) -> std::io::Result<()> {
+    let ctl_device = open_ctl_device();
+
+    match ioctl::disconnect(&ctl_device, minor) {
+        Ok(()) => {
+            println!("Disconnected device /dev/tcpuart{minor}");
+            Ok(())
+        }
+        Err(ioctl::IoctlError::DeviceNotFound) => {
+            eprintln!("Device /dev/tcpuart{minor} not found");
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Device not found",
+            ))
+        }
+        Err(ioctl::IoctlError::Other(err)) => {
+            eprintln!("Failed to disconnect device: {err}");
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Ioctl failed",
+            ))
+        }
+        _ => unreachable!(),
+    }
+}
+
 fn main() -> std::io::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Connect { addr, port } => {
-            println!("Connecting to {addr}:{port}");
-            connect_device(addr, port)
-        }
-        Commands::Disconnect { device } => {
-            println!("Disconnecting {device}");
-            todo!()
-        }
+        Commands::Connect { addr, port } => connect_device(addr, port),
+        Commands::Disconnect { minor } => disconnect_device(minor),
         Commands::GetServer { device } => {
             println!("Getting server for {device}");
             todo!()
