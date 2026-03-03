@@ -135,10 +135,10 @@ int conn_write(struct connection* conn, size_t count, char* buf) {
     };
 
     int ret = send_message(hdr, buf, conn->sock);
-    if (ret == -EPIPE) {
+    if (ret == -ECONNRESET) {
         pr_info("Socket was closed by peer\n");
         conn->disconnected = true;
-        return -EPIPE;
+        return ret;
     } else if (ret) {
         pr_err("Failed to send message: %d\n", ret);
         return ret < 0 ? ret : -EFAULT;

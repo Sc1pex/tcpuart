@@ -13,6 +13,9 @@ static struct tcpuart_state state;
 
 static int handle_connect_to_ioctl(const struct tcpuart_connect_to* conn_cmd) {
     // Try to find a minor device for connection
+    if (mutex_lock_interruptible(&state.mutex)) {
+        return -EINTR;
+    }
     int conn_idx = 0;
     for (; conn_idx < MAX_CONNS; conn_idx++) {
         if (!state.conns[conn_idx]) {
@@ -21,11 +24,14 @@ static int handle_connect_to_ioctl(const struct tcpuart_connect_to* conn_cmd) {
     }
     if (conn_idx == MAX_CONNS) {
         pr_err("no free connection slot\n");
+        mutex_unlock(&state.mutex);
         return -ENOSPC;
     }
 
     int ret =
         conn_create(&state.conns[conn_idx], conn_idx + 1, conn_cmd->addr, conn_cmd->port, &state);
+    mutex_unlock(&state.mutex);
+
     if (ret) {
         return ret;
     }
@@ -124,7 +130,13 @@ static ssize_t
 
 static int handle_conn_open(struct inode* inode, struct file* file) {
     int minor = iminor(inode);
+
+    if (mutex_lock_interruptible(&state.mutex)) {
+        return -EINTR;
+    }
     struct connection* conn = state.conns[minor - 1];
+    mutex_unlock(&state.mutex);
+
     if (!conn) {
         return -ENODEV;
     }
@@ -136,16 +148,25 @@ static int handle_conn_open(struct inode* inode, struct file* file) {
 
 static int handle_conn_release(struct inode* inode, struct file* file) {
     int minor = iminor(inode);
+
+    if (mutex_lock_interruptible(&state.mutex)) {
+        return -EINTR;
+    }
+
     if (!state.conns[minor - 1]) {
         return -ENODEV;
     }
-
     conn_close(&state.conns[minor - 1], &state);
+
+    mutex_unlock(&state.mutex);
+
     file->private_data = NULL;
     return 0;
 }
 
 static int __init tcpuart_init(void) {
+    mutex_init(&state.mutex);
+
     state.ctl_fops.owner = THIS_MODULE;
     state.ctl_fops.unlocked_ioctl = handle_ctl_ioctl;
 

@@ -2,6 +2,7 @@
 #define _STATE_H
 
 #include <linux/cdev.h>
+#include <linux/mutex.h>
 
 #define MAX_DEVICES 16
 #define MAX_CONNS (MAX_DEVICES - 1)
@@ -15,6 +16,8 @@ struct tcpuart_state {
 
     struct file_operations ctl_fops;
     struct file_operations conn_fops;
+
+    struct mutex mutex;
 };
 
 #endif
