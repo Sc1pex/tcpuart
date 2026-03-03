@@ -16,6 +16,9 @@ struct connection {
 
     uint8_t read_data_buf[MAXIMUM_MESSAGE_SIZE];
     size_t read_data_buf_len;
+
+    int disconnected;
+    atomic_t open_count;
 };
 
 int conn_create(
@@ -23,6 +26,15 @@ int conn_create(
     const struct tcpuart_state* state
 );
 
+ssize_t conn_read(struct connection* conn, size_t count, char __user* dest_buf, int no_block);
+// Count must be < MAXIMUM_MESSAGE_SIZE
+int conn_write(struct connection* conn, size_t count, char* buf);
+
 void conn_destroy(struct connection** conn, const struct tcpuart_state* state);
+
+void conn_open(struct connection* conn);
+void conn_close(struct connection** conn, const struct tcpuart_state* state);
+
+void conn_disconnect(struct connection* conn);
 
 #endif

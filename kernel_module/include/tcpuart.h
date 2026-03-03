@@ -20,4 +20,7 @@ struct tcpuart_connect_to {
 
 #define TCPUART_CONNECT_TO _IOW(TCPUART_MAGIC, 0, struct tcpuart_connect_to)
 
+// Disconnect the connection with the given minor device number (1-based).
+#define TCPUART_DISCONNECT _IOW(TCPUART_MAGIC, 1, unsigned int)
+
 #endif
