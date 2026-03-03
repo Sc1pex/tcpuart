@@ -33,6 +33,7 @@ int conn_create(
     struct connection* conn = *p_conn;
 
     conn->minor = minor;
+    atomic_set(&conn->open_count, 0);
 
     // Try to connect to the socket
     int rc = create_tcp_socket(&conn->sock, addr, port);
@@ -97,7 +98,7 @@ ssize_t conn_read(struct connection* conn, size_t count, char __user* dest_buf, 
         if (ret) {
             if (ret == -EAGAIN) {
                 return -EAGAIN;
-            } else if (ret == -EPIPE) {
+            } else if (ret == -ECONNRESET) {
                 pr_info("Socket was closed by peer\n");
                 conn->disconnected = true;
                 return 0;

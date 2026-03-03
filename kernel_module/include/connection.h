@@ -2,8 +2,8 @@
 #define _CONNECTION_H
 
 #include <linux/cdev.h>
+#include <linux/fs.h>
 #include <net/sock.h>
-#include "linux/fs.h"
 #include "message.h"
 #include "state.h"
 
