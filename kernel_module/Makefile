@@ -1,5 +1,5 @@
 obj-m += tcpuart.o
-tcpuart-y := src/tcpuart.o src/message.o
+tcpuart-y := src/tcpuart.o src/message.o src/connection.o
 ccflags-y := -I$(src)/include
 
 KDIR := /lib/modules/$(shell uname -r)/build

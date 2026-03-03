@@ -6,57 +6,11 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <net/sock.h>
+#include "connection.h"
 #include "message.h"
-
-#define MAX_DEVICES 16
-#define MAX_CONNS (MAX_DEVICES - 1)
-
-struct connection {
-    struct cdev cdev;
-    struct device* device;
-    int minor;
-
-    struct socket* sock;
-
-    uint8_t read_data_buf[MAXIMUM_MESSAGE_SIZE];
-    size_t read_data_buf_len;
-};
-
-struct tcpuart_state {
-    dev_t base_dev_num;
-    struct class* tcpuart_class;
-
-    struct cdev ctl_cdev;
-    struct connection* conns[MAX_CONNS];
-
-    struct file_operations ctl_fops;
-    struct file_operations conn_fops;
-};
+#include "state.h"
 
 static struct tcpuart_state state;
-
-static int create_tcp_socket(struct socket** sock, uint32_t addr, uint16_t port) {
-    int rc = sock_create_kern(&init_net, AF_INET, SOCK_STREAM, IPPROTO_TCP, sock);
-    if (rc) {
-        return rc;
-    }
-
-    struct sockaddr_in saddr = {
-        .sin_family = AF_INET,
-        .sin_addr.s_addr = addr,
-        .sin_port = port,
-    };
-
-    rc = kernel_connect(*sock, (struct sockaddr*) &saddr, sizeof(saddr), 0);
-    if (rc) {
-        sock_release(*sock);
-        sock = NULL;
-        return rc;
-    }
-
-    return 0;
-}
 
 static long handle_ctl_ioctl(struct file* file, unsigned int cmd, unsigned long arg) {
     switch (cmd) {
@@ -79,40 +33,13 @@ static long handle_ctl_ioctl(struct file* file, unsigned int cmd, unsigned long 
             return -ENOSPC;
         }
 
-        struct connection* conn = kzalloc(sizeof(*conn), GFP_KERNEL);
-        if (!conn) {
-            return -ENOMEM;
+        int ret =
+            conn_create(&state.conns[conn_idx], conn_idx + 1, conn_cmd.addr, conn_cmd.port, &state);
+        if (ret) {
+            return ret;
         }
 
-        // +1 for the ctl device
-        conn->minor = conn_idx + 1;
-
-        // Try to connect to the socket
-        int rc = create_tcp_socket(&conn->sock, conn_cmd.addr, conn_cmd.port);
-        if (rc) {
-            pr_err("failed to connect to tcp server\n");
-            kfree(conn);
-            return rc;
-        }
-
-        dev_t new_dev = MKDEV(MAJOR(state.base_dev_num), conn->minor);
-        cdev_init(&conn->cdev, &state.conn_fops);
-        if (cdev_add(&conn->cdev, new_dev, 1)) {
-            pr_err("failed to add cdev for conn\n");
-            kfree(conn);
-            return -ENOMEM;
-        }
-
-        conn->device =
-            device_create(state.tcpuart_class, NULL, new_dev, NULL, "tcpuart%d", conn->minor);
-        if (IS_ERR(conn->device)) {
-            pr_err("failed to create device for minor %d\n", conn->minor);
-            cdev_del(&conn->cdev);
-            kfree(conn);
-            return PTR_ERR(conn->device);
-        }
-
-        state.conns[conn_idx] = conn;
+        struct connection* conn = state.conns[conn_idx];
         pr_info(
             "created /dev/tcpuart%d for %pI4:%d\n", conn->minor, &conn_cmd.addr,
             ntohs(conn_cmd.port)
@@ -260,14 +187,7 @@ static int __init tcpuart_init(void) {
 
 static void __exit tcpuart_exit(void) {
     for (int i = 0; i < MAX_CONNS; i++) {
-        if (state.conns[i]) {
-            cdev_del(&state.conns[i]->cdev);
-            device_destroy(
-                state.tcpuart_class, MKDEV(MAJOR(state.base_dev_num), state.conns[i]->minor)
-            );
-            kfree(state.conns[i]);
-            state.conns[i] = NULL;
-        }
+        conn_destroy(&state.conns[i], &state);
     }
 
     cdev_del(&state.ctl_cdev);
