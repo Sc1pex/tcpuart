@@ -56,7 +56,9 @@ static int handle_disconnect_ioctl(unsigned int minor) {
         return -ENODEV;
     }
 
-    conn_disconnect(state.conns[conn_idx]);
+    if (conn_disconnect(state.conns[conn_idx]) == CONN_DELETED) {
+        state.conns[conn_idx] = NULL;
+    }
     return 0;
 }
 
@@ -154,9 +156,13 @@ static int handle_conn_release(struct inode* inode, struct file* file) {
     }
 
     if (!state.conns[minor - 1]) {
+        mutex_unlock(&state.mutex);
         return -ENODEV;
     }
-    conn_close(&state.conns[minor - 1], &state);
+
+    if (conn_close(state.conns[minor - 1]) == CONN_DELETED) {
+        state.conns[minor - 1] = NULL;
+    }
 
     mutex_unlock(&state.mutex);
 
@@ -189,7 +195,9 @@ static int __init tcpuart_init(void) {
 
 static void __exit tcpuart_exit(void) {
     for (int i = 0; i < MAX_CONNS; i++) {
-        conn_destroy(&state.conns[i], &state);
+        if (state.conns[i]) {
+            conn_destroy(state.conns[i]);
+        }
     }
 
     cdev_del(&state.ctl_cdev);

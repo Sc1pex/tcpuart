@@ -32,7 +32,11 @@ int conn_create(
     }
     struct connection* conn = *p_conn;
 
+    conn->tcpuart_class = state->tcpuart_class;
+
     conn->minor = minor;
+    conn->major = MAJOR(state->base_dev_num);
+
     atomic_set(&conn->open_count, 0);
 
     // Try to connect to the socket
@@ -146,30 +150,37 @@ int conn_write(struct connection* conn, size_t count, char* buf) {
     return 0;
 }
 
-void conn_destroy(struct connection** conn, const struct tcpuart_state* state) {
-    if (*conn) {
-        cdev_del(&(*conn)->cdev);
-        device_destroy(state->tcpuart_class, MKDEV(MAJOR(state->base_dev_num), (*conn)->minor));
-        sock_release((*conn)->sock);
-        kfree(*conn);
-        *conn = NULL;
-    }
+void conn_destroy(struct connection* conn) {
+    cdev_del(&conn->cdev);
+    device_destroy(conn->tcpuart_class, MKDEV(conn->major, conn->minor));
+    sock_release(conn->sock);
+    kfree(conn);
 }
 
 void conn_open(struct connection* conn) {
     atomic_inc(&conn->open_count);
 }
 
-void conn_close(struct connection** conn, const struct tcpuart_state* state) {
-    if (atomic_dec_and_test(&(*conn)->open_count)) {
-        if ((*conn)->disconnected) {
-            pr_info("Destroying connection for minor %d\n", (*conn)->minor);
-            conn_destroy(conn, state);
+int conn_close(struct connection* conn) {
+    if (atomic_dec_and_test(&conn->open_count)) {
+        if (conn->disconnected) {
+            pr_info("Destroying connection for minor %d\n", conn->minor);
+            conn_destroy(conn);
+            return CONN_DELETED;
         }
     }
+    return 0;
 }
 
-void conn_disconnect(struct connection* conn) {
+int conn_disconnect(struct connection* conn) {
     kernel_sock_shutdown(conn->sock, SHUT_RDWR);
     conn->disconnected = true;
+
+    if (atomic_read(&conn->open_count) == 0) {
+        pr_info("Destroying connection for minor %d\n", conn->minor);
+        conn_destroy(conn);
+        return CONN_DELETED;
+    }
+
+    return 0;
 }

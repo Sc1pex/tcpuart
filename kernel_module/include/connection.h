@@ -10,7 +10,10 @@
 struct connection {
     struct cdev cdev;
     struct device* device;
+    struct class* tcpuart_class;
+
     int minor;
+    int major;
 
     struct socket* sock;
 
@@ -21,6 +24,8 @@ struct connection {
     atomic_t open_count;
 };
 
+#define CONN_DELETED 1
+
 int conn_create(
     struct connection** conn, int minor, uint32_t addr, uint16_t port,
     const struct tcpuart_state* state
@@ -30,11 +35,10 @@ ssize_t conn_read(struct connection* conn, size_t count, char __user* dest_buf, 
 // Count must be < MAXIMUM_MESSAGE_SIZE
 int conn_write(struct connection* conn, size_t count, char* buf);
 
-void conn_destroy(struct connection** conn, const struct tcpuart_state* state);
-
 void conn_open(struct connection* conn);
-void conn_close(struct connection** conn, const struct tcpuart_state* state);
+int conn_close(struct connection* conn);
 
-void conn_disconnect(struct connection* conn);
+int conn_disconnect(struct connection* conn);
+void conn_destroy(struct connection* conn);
 
 #endif
