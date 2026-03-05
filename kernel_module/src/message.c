@@ -12,10 +12,10 @@ static void from_network_order(struct MessageHeader* header) {
 
 static int validate_header(struct MessageHeader header) {
     if (header.kind >= MESSAGE_KIND__COUNT) {
-        return MESSAGE_ERROR_INVALID_KIND;
+        return -EPROTO;
     }
     if (header.size > MAXIMUM_MESSAGE_SIZE) {
-        return MESSAGE_ERROR_INVALID_SIZE;
+        return -EPROTO;
     }
     return 0;
 }
@@ -39,11 +39,10 @@ int send_message(struct MessageHeader header, uint8_t* content, struct socket* s
 
     to_network_order(&header);
     res = kernel_sendmsg(socket, &msg, io, 2, msg_len);
-    if (res < 0) {
-        pr_err("Failed to send packet\n");
-        return res;
-    }
 
+    if (res != msg_len) {
+        return (res < 0) ? res : -EIO;
+    }
     return 0;
 }
 
@@ -59,10 +58,8 @@ int recv_message(
 
     // Read the header
     int res = kernel_recvmsg(socket, &msg, &io, 1, sizeof(*header), msg.msg_flags);
-    if (res < 0) {
-        return res;
-    } else if (res == 0) {
-        return -ECONNRESET;
+    if (res != sizeof(*header)) {
+        return (res < 0) ? res : -EIO;
     }
 
     from_network_order(header);
@@ -76,10 +73,8 @@ int recv_message(
     io.iov_len = header->size;
     msg.msg_flags = noblock ? MSG_DONTWAIT : MSG_WAITALL;
     res = kernel_recvmsg(socket, &msg, &io, 1, header->size, msg.msg_flags);
-    if (res < 0) {
-        return res;
-    } else if (res == 0) {
-        return -ECONNRESET;
+    if (res != header->size) {
+        return (res < 0) ? res : -EIO;
     }
 
     return 0;

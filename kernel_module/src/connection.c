@@ -101,7 +101,7 @@ ssize_t conn_read(struct connection* conn, size_t count, char __user* dest_buf, 
         int ret = recv_message(&hdr, conn->read_data_buf, conn->sock, no_block);
         if (ret) {
             if (ret == -EAGAIN) {
-                return -EAGAIN;
+                return ret;
             } else if (ret == -ECONNRESET) {
                 pr_info("Socket was closed by peer\n");
                 conn->disconnected = true;
@@ -109,7 +109,7 @@ ssize_t conn_read(struct connection* conn, size_t count, char __user* dest_buf, 
             }
 
             pr_err("Failed to receive message: %d\n", ret);
-            return ret < 0 ? ret : -EFAULT;
+            return ret;
         }
         conn->read_data_buf_len = hdr.size;
     } while (hdr.kind != MESSAGE_KIND_DATA);
@@ -139,13 +139,15 @@ int conn_write(struct connection* conn, size_t count, char* buf) {
     };
 
     int ret = send_message(hdr, buf, conn->sock);
-    if (ret == -ECONNRESET) {
-        pr_info("Socket was closed by peer\n");
-        conn->disconnected = true;
+
+    if (ret) {
+        if (ret == -ECONNRESET || ret == -EPIPE || ret == -ESHUTDOWN || ret == -ETIMEDOUT) {
+            pr_info("Socket was closed by peer\n");
+            conn->disconnected = true;
+            return ret;
+        }
+
         return ret;
-    } else if (ret) {
-        pr_err("Failed to send message: %d\n", ret);
-        return ret < 0 ? ret : -EFAULT;
     }
     return 0;
 }

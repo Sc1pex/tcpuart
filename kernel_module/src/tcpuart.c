@@ -80,7 +80,7 @@ static long handle_ctl_ioctl(struct file* file, unsigned int cmd, unsigned long 
 
     default:
         pr_info("Invalid ioctl number\n");
-        return -EINVAL;
+        return -ENOTTY;
     }
 }
 
