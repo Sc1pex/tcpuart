@@ -6,6 +6,7 @@
 #include <net/sock.h>
 #include "message.h"
 #include "state.h"
+#include "tcpuart.h"
 
 struct connection {
     struct cdev cdev;
@@ -40,5 +41,7 @@ int conn_close(struct connection* conn);
 
 int conn_disconnect(struct connection* conn);
 void conn_destroy(struct connection* conn);
+
+int conn_get_info(struct connection* conn, struct tcpuart_server_info* info);
 
 #endif

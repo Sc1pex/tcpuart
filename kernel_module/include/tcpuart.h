@@ -23,4 +23,14 @@ struct tcpuart_connect_to {
 // Disconnect the connection with the given minor device number (1-based).
 #define TCPUART_DISCONNECT _IOW(TCPUART_MAGIC, 1, unsigned int)
 
+struct tcpuart_server_info {
+    uint32_t minor;
+    // Network byte order
+    uint32_t addr;
+    // Network byte order
+    uint16_t port;
+};
+
+#define TCPUART_GET_SERVER_INFO _IOWR(TCPUART_MAGIC, 2, struct tcpuart_server_info)
+
 #endif

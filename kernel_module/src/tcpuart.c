@@ -62,6 +62,20 @@ static int handle_disconnect_ioctl(unsigned int minor) {
     return 0;
 }
 
+static int handle_get_server_info(struct tcpuart_server_info* info) {
+    struct connection* conn = state.conns[info->minor - 1];
+    if (!conn) {
+        return -ENODEV;
+    }
+
+    int ret = conn_get_info(conn, info);
+    if (ret) {
+        return ret;
+    }
+
+    return 0;
+}
+
 static long handle_ctl_ioctl(struct file* file, unsigned int cmd, unsigned long arg) {
     switch (cmd) {
     case TCPUART_CONNECT_TO: {
@@ -73,9 +87,30 @@ static long handle_ctl_ioctl(struct file* file, unsigned int cmd, unsigned long 
 
         return handle_connect_to_ioctl(&conn_cmd);
     }
+
     case TCPUART_DISCONNECT: {
         pr_info("Got disconnect ioctl with arg: %lu\n", arg);
         return handle_disconnect_ioctl(arg);
+    }
+
+    case TCPUART_GET_SERVER_INFO: {
+        struct tcpuart_server_info server_info;
+        if (copy_from_user(&server_info, (void __user*) arg, sizeof(server_info))) {
+            pr_err("failed to copy data from user\n");
+            return -EFAULT;
+        }
+
+        int ret = handle_get_server_info(&server_info);
+        if (ret) {
+            return ret;
+        }
+
+        if (copy_to_user((void __user*) arg, &server_info, sizeof(server_info))) {
+            pr_err("failed to copy data to user\n");
+            return -EFAULT;
+        }
+
+        return 0;
     }
 
     default:

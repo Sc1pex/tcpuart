@@ -16,8 +16,8 @@ enum Commands {
     /// Disconnect the device with the specified minor number
     Disconnect { minor: u64 },
 
-    /// Get the server ip and port of the specified device
-    GetServer { device: String },
+    /// Get the server ip and port for the device with the specified minor number
+    GetServer { minor: u32 },
 
     /// List all connected devices
     List,
@@ -87,16 +87,43 @@ fn disconnect_device(minor: u64) -> std::io::Result<()> {
     }
 }
 
+fn get_server_info(minor: u32) -> std::io::Result<()> {
+    let ctl_device = open_ctl_device();
+
+    match ioctl::get_server_info(&ctl_device, minor) {
+        Ok(addr) => {
+            let ip = std::net::Ipv4Addr::from(addr.addr);
+            println!(
+                "Device /dev/tcpuart{minor} is connected to {ip}:{}",
+                addr.port
+            );
+            Ok(())
+        }
+        Err(ioctl::IoctlError::DeviceNotFound) => {
+            eprintln!("Device /dev/tcpuart{minor} not found");
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Device not found",
+            ))
+        }
+        Err(ioctl::IoctlError::Other(err)) => {
+            eprintln!("Failed to get server info: {err}");
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Ioctl failed",
+            ))
+        }
+        _ => unreachable!(),
+    }
+}
+
 fn main() -> std::io::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
         Commands::Connect { addr, port } => connect_device(addr, port),
         Commands::Disconnect { minor } => disconnect_device(minor),
-        Commands::GetServer { device } => {
-            println!("Getting server for {device}");
-            todo!()
-        }
+        Commands::GetServer { minor } => get_server_info(minor),
         Commands::List => {
             println!("Listing all connected devices");
             todo!()

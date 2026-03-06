@@ -186,3 +186,20 @@ int conn_disconnect(struct connection* conn) {
 
     return 0;
 }
+
+int conn_get_info(struct connection* conn, struct tcpuart_server_info* info) {
+    if (conn->disconnected) {
+        return -ENOTCONN;
+    }
+
+    struct sockaddr_in saddr;
+    int ret = kernel_getpeername(conn->sock, (struct sockaddr*) &saddr);
+    if (ret < 0) {
+        return ret;
+    }
+
+    info->addr = saddr.sin_addr.s_addr;
+    info->port = saddr.sin_port;
+
+    return 0;
+}
