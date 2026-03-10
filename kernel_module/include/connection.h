@@ -20,6 +20,7 @@ struct connection {
 
     uint8_t read_data_buf[MAXIMUM_MESSAGE_SIZE];
     size_t read_data_buf_len;
+    struct mutex read_mutex;
 
     atomic_t disconnected;
     atomic_t refcount;

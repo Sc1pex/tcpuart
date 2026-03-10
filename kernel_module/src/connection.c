@@ -63,6 +63,7 @@ int conn_init(
 
 void conn_init_empty(struct connection* conn) {
     atomic_set(&conn->disconnected, true);
+    mutex_init(&conn->read_mutex);
 }
 
 int conn_avabile(struct connection* conn) {
@@ -77,11 +78,14 @@ int conn_alive(struct connection* conn) {
 }
 
 ssize_t conn_read(struct connection* conn, size_t count, char __user* dest_buf, int no_block) {
+    mutex_lock(&conn->read_mutex);
+
     // First check if there is data left in the conn buffer
     if (conn->read_data_buf_len) {
         pr_info("Sending left ovevr data\n");
         ssize_t send_cnt = min(count, conn->read_data_buf_len);
         if (copy_to_user(dest_buf, conn->read_data_buf, send_cnt)) {
+            mutex_unlock(&conn->read_mutex);
             return -EFAULT;
         }
 
@@ -90,10 +94,12 @@ ssize_t conn_read(struct connection* conn, size_t count, char __user* dest_buf, 
         );
         conn->read_data_buf_len -= send_cnt;
 
+        mutex_unlock(&conn->read_mutex);
         return send_cnt;
     }
 
     if (atomic_read(&conn->disconnected)) {
+        mutex_unlock(&conn->read_mutex);
         // No more data will be coming in, return 0 to indicate EOF
         return 0;
     }
@@ -104,12 +110,15 @@ ssize_t conn_read(struct connection* conn, size_t count, char __user* dest_buf, 
         pr_info("Reading from socket\n");
         int ret = recv_message(&hdr, conn->read_data_buf, conn->sock, no_block);
         if (ret) {
+            mutex_unlock(&conn->read_mutex);
+
             if (ret == -EAGAIN) {
                 return ret;
             } else if (ret == -ECONNRESET || ret == -EPIPE || ret == -ESHUTDOWN
                        || ret == -ETIMEDOUT) {
                 pr_info("Socket was closed by peer\n");
                 conn_disconnect(conn);
+
                 return 0;
             }
 
@@ -122,6 +131,7 @@ ssize_t conn_read(struct connection* conn, size_t count, char __user* dest_buf, 
     pr_info("Received data message of size: %zu\n", conn->read_data_buf_len);
     ssize_t send_cnt = min(count, conn->read_data_buf_len);
     if (copy_to_user(dest_buf, conn->read_data_buf, send_cnt)) {
+        mutex_unlock(&conn->read_mutex);
         return -EFAULT;
     }
 
@@ -130,6 +140,7 @@ ssize_t conn_read(struct connection* conn, size_t count, char __user* dest_buf, 
     );
     conn->read_data_buf_len -= send_cnt;
 
+    mutex_unlock(&conn->read_mutex);
     return send_cnt;
 }
 
