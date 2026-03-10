@@ -12,13 +12,13 @@
 static struct tcpuart_state state;
 
 static int handle_connect_to_ioctl(const struct tcpuart_connect_to* conn_cmd) {
-    // Try to find a minor device for connection
     if (mutex_lock_interruptible(&state.mutex)) {
         return -EINTR;
     }
+    // Try to find a minor device for connection
     int conn_idx = 0;
     for (; conn_idx < MAX_CONNS; conn_idx++) {
-        if (!state.conns[conn_idx]) {
+        if (conn_avabile(state.conns[conn_idx])) {
             break;
         }
     }
@@ -29,7 +29,7 @@ static int handle_connect_to_ioctl(const struct tcpuart_connect_to* conn_cmd) {
     }
 
     int ret =
-        conn_create(&state.conns[conn_idx], conn_idx + 1, conn_cmd->addr, conn_cmd->port, &state);
+        conn_init(state.conns[conn_idx], conn_idx + 1, conn_cmd->addr, conn_cmd->port, &state);
     mutex_unlock(&state.mutex);
 
     if (ret) {
@@ -50,30 +50,43 @@ static int handle_disconnect_ioctl(unsigned int minor) {
         return -EINVAL;
     }
 
-    int conn_idx = minor - 1;
-    if (!state.conns[conn_idx]) {
-        pr_err("no connection for minor number: %d\n", minor);
-        return -ENODEV;
+    if (mutex_lock_interruptible(&state.mutex)) {
+        return -EINTR;
     }
 
-    if (conn_disconnect(state.conns[conn_idx]) == CONN_DELETED) {
-        state.conns[conn_idx] = NULL;
+    int conn_idx = minor - 1;
+    if (!conn_alive(state.conns[conn_idx])) {
+        pr_err("no connection for minor number: %d\n", minor);
+        mutex_unlock(&state.mutex);
+        return -ENODEV;
     }
+    conn_disconnect(state.conns[conn_idx]);
+
+    mutex_unlock(&state.mutex);
+
     return 0;
 }
 
 static int handle_get_server_info(struct tcpuart_server_info* info) {
+    if (info->minor < 1 || info->minor > MAX_CONNS) {
+        pr_err("invalid minor number: %d\n", info->minor);
+        return -EINVAL;
+    }
+
+    if (mutex_lock_interruptible(&state.mutex)) {
+        return -EINTR;
+    }
+
     struct connection* conn = state.conns[info->minor - 1];
-    if (!conn) {
+    if (!conn_alive(conn)) {
+        mutex_unlock(&state.mutex);
         return -ENODEV;
     }
 
     int ret = conn_get_info(conn, info);
-    if (ret) {
-        return ret;
-    }
+    mutex_unlock(&state.mutex);
 
-    return 0;
+    return ret;
 }
 
 static long handle_ctl_ioctl(struct file* file, unsigned int cmd, unsigned long arg) {
@@ -172,36 +185,31 @@ static int handle_conn_open(struct inode* inode, struct file* file) {
         return -EINTR;
     }
     struct connection* conn = state.conns[minor - 1];
-    mutex_unlock(&state.mutex);
 
-    if (!conn) {
+    if (!conn_alive(conn)) {
+        mutex_unlock(&state.mutex);
         return -ENODEV;
     }
 
-    conn_open(conn);
+    int ret = conn_open(conn);
+    if (ret) {
+        mutex_unlock(&state.mutex);
+        return ret;
+    }
+
+    mutex_unlock(&state.mutex);
+
     file->private_data = conn;
     return 0;
 }
 
 static int handle_conn_release(struct inode* inode, struct file* file) {
     int minor = iminor(inode);
-
-    if (mutex_lock_interruptible(&state.mutex)) {
-        return -EINTR;
-    }
-
-    if (!state.conns[minor - 1]) {
-        mutex_unlock(&state.mutex);
-        return -ENODEV;
-    }
-
-    if (conn_close(state.conns[minor - 1]) == CONN_DELETED) {
-        state.conns[minor - 1] = NULL;
-    }
-
+    mutex_lock(&state.mutex);
+    conn_close(state.conns[minor - 1]);
     mutex_unlock(&state.mutex);
-
     file->private_data = NULL;
+
     return 0;
 }
 
@@ -225,13 +233,22 @@ static int __init tcpuart_init(void) {
     cdev_add(&state.ctl_cdev, state.base_dev_num, 1);
     device_create(state.tcpuart_class, NULL, state.base_dev_num, NULL, "tcpuart0");
 
+    for (int i = 0; i < MAX_CONNS; i++) {
+        state.conns[i] = kzalloc(sizeof(struct connection), GFP_KERNEL);
+        conn_init_empty(state.conns[i]);
+    }
+
     return 0;
 }
 
 static void __exit tcpuart_exit(void) {
     for (int i = 0; i < MAX_CONNS; i++) {
         if (state.conns[i]) {
-            conn_destroy(state.conns[i]);
+            conn_disconnect(state.conns[i]);
+            if (state.conns[i]->sock) {
+                conn_destroy(state.conns[i]);
+            }
+            kfree(state.conns[i]);
         }
     }
 

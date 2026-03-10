@@ -22,29 +22,19 @@ static int create_tcp_socket(struct socket** sock, uint32_t addr, uint16_t port)
     return 0;
 }
 
-int conn_create(
-    struct connection** p_conn, int minor, uint32_t addr, uint16_t port,
+int conn_init(
+    struct connection* conn, int minor, uint32_t addr, uint16_t port,
     const struct tcpuart_state* state
 ) {
-    *p_conn = kzalloc(sizeof(**p_conn), GFP_KERNEL);
-    if (!(*p_conn)) {
-        return -ENOMEM;
-    }
-    struct connection* conn = *p_conn;
-
     conn->tcpuart_class = state->tcpuart_class;
 
     conn->minor = minor;
     conn->major = MAJOR(state->base_dev_num);
 
-    atomic_set(&conn->open_count, 0);
-
     // Try to connect to the socket
     int rc = create_tcp_socket(&conn->sock, addr, port);
     if (rc) {
         pr_err("failed to connect to tcp server\n");
-        kfree(conn);
-        *p_conn = NULL;
         return rc;
     }
 
@@ -53,8 +43,6 @@ int conn_create(
     if (cdev_add(&conn->cdev, new_dev, 1)) {
         pr_err("failed to add cdev for conn\n");
         sock_release(conn->sock);
-        kfree(conn);
-        *p_conn = NULL;
         return -ENOMEM;
     }
 
@@ -64,12 +52,28 @@ int conn_create(
         pr_err("failed to create device for minor %d\n", conn->minor);
         cdev_del(&conn->cdev);
         sock_release(conn->sock);
-        *p_conn = NULL;
-        kfree(conn);
         return PTR_ERR(conn->device);
     }
 
+    atomic_set(&conn->disconnected, false);
+    atomic_set(&conn->refcount, 1);
+
     return 0;
+}
+
+void conn_init_empty(struct connection* conn) {
+    atomic_set(&conn->disconnected, true);
+}
+
+int conn_avabile(struct connection* conn) {
+    return atomic_read(&conn->refcount) == 0;
+}
+
+int conn_alive(struct connection* conn) {
+    if (atomic_read(&conn->refcount)) {
+        return !atomic_read(&conn->disconnected);
+    }
+    return false;
 }
 
 ssize_t conn_read(struct connection* conn, size_t count, char __user* dest_buf, int no_block) {
@@ -89,7 +93,7 @@ ssize_t conn_read(struct connection* conn, size_t count, char __user* dest_buf, 
         return send_cnt;
     }
 
-    if (conn->disconnected) {
+    if (atomic_read(&conn->disconnected)) {
         // No more data will be coming in, return 0 to indicate EOF
         return 0;
     }
@@ -102,9 +106,10 @@ ssize_t conn_read(struct connection* conn, size_t count, char __user* dest_buf, 
         if (ret) {
             if (ret == -EAGAIN) {
                 return ret;
-            } else if (ret == -ECONNRESET) {
+            } else if (ret == -ECONNRESET || ret == -EPIPE || ret == -ESHUTDOWN
+                       || ret == -ETIMEDOUT) {
                 pr_info("Socket was closed by peer\n");
-                conn->disconnected = true;
+                conn_disconnect(conn);
                 return 0;
             }
 
@@ -129,7 +134,7 @@ ssize_t conn_read(struct connection* conn, size_t count, char __user* dest_buf, 
 }
 
 int conn_write(struct connection* conn, size_t count, char* buf) {
-    if (conn->disconnected) {
+    if (atomic_read(&conn->disconnected)) {
         return -EPIPE;
     }
 
@@ -143,7 +148,7 @@ int conn_write(struct connection* conn, size_t count, char* buf) {
     if (ret) {
         if (ret == -ECONNRESET || ret == -EPIPE || ret == -ESHUTDOWN || ret == -ETIMEDOUT) {
             pr_info("Socket was closed by peer\n");
-            conn->disconnected = true;
+            conn_disconnect(conn);
             return ret;
         }
 
@@ -152,43 +157,39 @@ int conn_write(struct connection* conn, size_t count, char* buf) {
     return 0;
 }
 
-void conn_destroy(struct connection* conn) {
-    cdev_del(&conn->cdev);
-    device_destroy(conn->tcpuart_class, MKDEV(conn->major, conn->minor));
-    sock_release(conn->sock);
-    kfree(conn);
+int conn_open(struct connection* conn) {
+    if (!atomic_inc_not_zero(&conn->refcount)) {
+        return -ENOTCONN;
+    }
+    return 0;
 }
 
-void conn_open(struct connection* conn) {
-    atomic_inc(&conn->open_count);
+void conn_close(struct connection* conn) {
+    if (atomic_dec_and_test(&conn->refcount)) {
+        conn_destroy(conn);
+    }
 }
 
-int conn_close(struct connection* conn) {
-    if (atomic_dec_and_test(&conn->open_count)) {
-        if (conn->disconnected) {
-            pr_info("Destroying connection for minor %d\n", conn->minor);
+void conn_disconnect(struct connection* conn) {
+    if (atomic_cmpxchg(&conn->disconnected, false, true) == false) {
+        kernel_sock_shutdown(conn->sock, SHUT_RDWR);
+        cdev_del(&conn->cdev);
+        device_destroy(conn->tcpuart_class, MKDEV(conn->major, conn->minor));
+
+        if (atomic_dec_and_test(&conn->refcount)) {
             conn_destroy(conn);
-            return CONN_DELETED;
         }
     }
-    return 0;
 }
 
-int conn_disconnect(struct connection* conn) {
-    kernel_sock_shutdown(conn->sock, SHUT_RDWR);
-    conn->disconnected = true;
-
-    if (atomic_read(&conn->open_count) == 0) {
-        pr_info("Destroying connection for minor %d\n", conn->minor);
-        conn_destroy(conn);
-        return CONN_DELETED;
-    }
-
-    return 0;
+void conn_destroy(struct connection* conn) {
+    sock_release(conn->sock);
+    conn->sock = NULL;
+    conn->read_data_buf_len = 0;
 }
 
 int conn_get_info(struct connection* conn, struct tcpuart_server_info* info) {
-    if (conn->disconnected) {
+    if (atomic_read(&conn->disconnected)) {
         return -ENOTCONN;
     }
 

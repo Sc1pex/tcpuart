@@ -21,25 +21,29 @@ struct connection {
     uint8_t read_data_buf[MAXIMUM_MESSAGE_SIZE];
     size_t read_data_buf_len;
 
-    int disconnected;
-    atomic_t open_count;
+    atomic_t disconnected;
+    atomic_t refcount;
 };
 
 #define CONN_DELETED 1
 
-int conn_create(
-    struct connection** conn, int minor, uint32_t addr, uint16_t port,
+int conn_init(
+    struct connection* conn, int minor, uint32_t addr, uint16_t port,
     const struct tcpuart_state* state
 );
+void conn_init_empty(struct connection* conn);
+
+int conn_avabile(struct connection* conn);
+int conn_alive(struct connection* conn);
 
 ssize_t conn_read(struct connection* conn, size_t count, char __user* dest_buf, int no_block);
 // Count must be < MAXIMUM_MESSAGE_SIZE
 int conn_write(struct connection* conn, size_t count, char* buf);
 
-void conn_open(struct connection* conn);
-int conn_close(struct connection* conn);
+int conn_open(struct connection* conn);
+void conn_close(struct connection* conn);
 
-int conn_disconnect(struct connection* conn);
+void conn_disconnect(struct connection* conn);
 void conn_destroy(struct connection* conn);
 
 int conn_get_info(struct connection* conn, struct tcpuart_server_info* info);
