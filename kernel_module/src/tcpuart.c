@@ -5,6 +5,7 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/tty.h>
 #include "connection.h"
 #include "message.h"
 #include "state.h"
@@ -28,43 +29,19 @@ static int handle_connect_to_ioctl(const struct tcpuart_connect_to* conn_cmd) {
         return -ENOSPC;
     }
 
-    int ret =
-        conn_init(state.conns[conn_idx], conn_idx + 1, conn_cmd->addr, conn_cmd->port, &state);
+    int ret = conn_init(
+        state.conns[conn_idx], conn_idx + 1, conn_cmd->addr, conn_cmd->port, state.tty_driver
+    );
     mutex_unlock(&state.mutex);
 
     if (ret) {
         return ret;
     }
 
-    struct connection* conn = state.conns[conn_idx];
     pr_info(
-        "created /dev/tcpuart%d for %pI4:%d\n", conn->minor, &conn_cmd->addr, ntohs(conn_cmd->port)
+        "created /dev/tcpuart%d for %pI4:%d\n", conn_idx + 1, &conn_cmd->addr, ntohs(conn_cmd->port)
     );
-
-    return conn->minor;
-}
-
-static int handle_disconnect_ioctl(unsigned int minor) {
-    if (minor < 1 || minor > MAX_CONNS) {
-        pr_err("invalid minor number: %d\n", minor);
-        return -EINVAL;
-    }
-
-    if (mutex_lock_interruptible(&state.mutex)) {
-        return -EINTR;
-    }
-
-    int conn_idx = minor - 1;
-    if (!conn_alive(state.conns[conn_idx])) {
-        pr_err("no connection for minor number: %d\n", minor);
-        mutex_unlock(&state.mutex);
-        return -ENODEV;
-    }
-    conn_disconnect(state.conns[conn_idx]);
-
-    mutex_unlock(&state.mutex);
-
-    return 0;
+    return conn_idx + 1;
 }
 
 static int handle_get_server_info(struct tcpuart_server_info* info) {
@@ -78,7 +55,7 @@ static int handle_get_server_info(struct tcpuart_server_info* info) {
     }
 
     struct connection* conn = state.conns[info->minor - 1];
-    if (!conn_alive(conn)) {
+    if (conn_avabile(conn)) {
         mutex_unlock(&state.mutex);
         return -ENODEV;
     }
@@ -99,11 +76,6 @@ static long handle_ctl_ioctl(struct file* file, unsigned int cmd, unsigned long 
         }
 
         return handle_connect_to_ioctl(&conn_cmd);
-    }
-
-    case TCPUART_DISCONNECT: {
-        pr_info("Got disconnect ioctl with arg: %lu\n", arg);
-        return handle_disconnect_ioctl(arg);
     }
 
     case TCPUART_GET_SERVER_INFO: {
@@ -139,79 +111,40 @@ static char* tcpuart_devnode(const struct device* dev, umode_t* mode) {
     return NULL;
 }
 
-static ssize_t handle_conn_read(struct file* file, char __user* buf, size_t count, loff_t* ppos) {
-    struct connection* conn = file->private_data;
-    if (!conn) {
-        return -ENODEV;
-    }
-    int noblock = file->f_flags & O_NONBLOCK;
-
-    return conn_read(conn, count, buf, noblock);
+static ssize_t handle_conn_write(struct tty_struct* tty, const unsigned char* buf, size_t count) {
+    struct connection* conn = tty->driver_data;
+    return conn_write(conn, buf, count);
 }
 
-static ssize_t
-    handle_conn_write(struct file* file, const char __user* buf, size_t count, loff_t* ppos) {
-    struct connection* conn = file->private_data;
-    if (!conn) {
+static int handle_conn_open(struct tty_struct* tty, struct file* file) {
+    int minor = tty->index;
+    if (minor < 1 || minor > MAX_CONNS) {
         return -ENODEV;
     }
 
-    char kbuf[MAXIMUM_MESSAGE_SIZE];
-    ssize_t written_cnt = 0;
-
-    while (count) {
-        size_t copy_cnt = min(count, MAXIMUM_MESSAGE_SIZE);
-        if (copy_from_user(kbuf, buf, copy_cnt)) {
-            return -EFAULT;
-        }
-
-        count -= copy_cnt;
-        written_cnt += copy_cnt;
-        buf += copy_cnt;
-
-        int ret = conn_write(conn, copy_cnt, kbuf);
-        if (ret) {
-            return ret;
-        }
-    }
-
-    return written_cnt;
+    tty->driver_data = state.conns[minor - 1];
+    return tty_port_open(&state.conns[minor - 1]->port, tty, file);
 }
 
-static int handle_conn_open(struct inode* inode, struct file* file) {
-    int minor = iminor(inode);
-
-    if (mutex_lock_interruptible(&state.mutex)) {
-        return -EINTR;
-    }
-    struct connection* conn = state.conns[minor - 1];
-
-    if (!conn_alive(conn)) {
-        mutex_unlock(&state.mutex);
-        return -ENODEV;
-    }
-
-    int ret = conn_open(conn);
-    if (ret) {
-        mutex_unlock(&state.mutex);
-        return ret;
-    }
-
-    mutex_unlock(&state.mutex);
-
-    file->private_data = conn;
-    return 0;
+static void handle_conn_close(struct tty_struct* tty, struct file* file) {
+    struct connection* conn = tty->driver_data;
+    tty_port_close(&conn->port, tty, file);
 }
 
-static int handle_conn_release(struct inode* inode, struct file* file) {
-    int minor = iminor(inode);
-    mutex_lock(&state.mutex);
-    conn_close(state.conns[minor - 1]);
-    mutex_unlock(&state.mutex);
-    file->private_data = NULL;
-
-    return 0;
+static unsigned int handle_conn_write_room(struct tty_struct* tty) {
+    struct connection* conn = tty->driver_data;
+    if (!conn->sock) {
+        return 0;
+    }
+    return MAXIMUM_MESSAGE_SIZE;
 }
+
+static const struct tty_operations conn_ops = {
+    .open = handle_conn_open,
+    .close = handle_conn_close,
+    .write = handle_conn_write,
+    .write_room = handle_conn_write_room,
+};
 
 static int __init tcpuart_init(void) {
     mutex_init(&state.mutex);
@@ -219,19 +152,34 @@ static int __init tcpuart_init(void) {
     state.ctl_fops.owner = THIS_MODULE;
     state.ctl_fops.unlocked_ioctl = handle_ctl_ioctl;
 
-    state.conn_fops.owner = THIS_MODULE;
-    state.conn_fops.write = handle_conn_write;
-    state.conn_fops.read = handle_conn_read;
-    state.conn_fops.open = handle_conn_open;
-    state.conn_fops.release = handle_conn_release;
-
-    alloc_chrdev_region(&state.base_dev_num, 0, MAX_DEVICES, "tcpuart");
-    state.tcpuart_class = class_create("tcpuart");
-    state.tcpuart_class->devnode = tcpuart_devnode;
+    dev_t dev_num;
+    alloc_chrdev_region(&dev_num, 0, 1, "tcpuart");
+    state.ctl_class = class_create("tcpuart");
+    state.ctl_class->devnode = tcpuart_devnode;
 
     cdev_init(&state.ctl_cdev, &state.ctl_fops);
-    cdev_add(&state.ctl_cdev, state.base_dev_num, 1);
-    device_create(state.tcpuart_class, NULL, state.base_dev_num, NULL, "tcpuart0");
+    cdev_add(&state.ctl_cdev, dev_num, 1);
+    device_create(state.ctl_class, NULL, dev_num, NULL, "tcpuart0");
+
+    state.tty_driver = tty_alloc_driver(MAX_DEVICES, TTY_DRIVER_DYNAMIC_DEV | TTY_DRIVER_REAL_RAW);
+    if (IS_ERR(state.tty_driver)) {
+        cdev_del(&state.ctl_cdev);
+        device_destroy(state.ctl_class, dev_num);
+        class_destroy(state.ctl_class);
+        unregister_chrdev_region(dev_num, MAX_DEVICES);
+        return PTR_ERR(state.tty_driver);
+    }
+
+    state.tty_driver->owner = THIS_MODULE;
+    state.tty_driver->driver_name = "tcpuart";
+    state.tty_driver->name = "tcpuart";
+    state.tty_driver->minor_start = 0;
+    state.tty_driver->type = TTY_DRIVER_TYPE_SERIAL;
+    state.tty_driver->subtype = SERIAL_TYPE_NORMAL;
+    state.tty_driver->init_termios = tty_std_termios;
+    state.tty_driver->ops = &conn_ops;
+
+    tty_register_driver(state.tty_driver);
 
     for (int i = 0; i < MAX_CONNS; i++) {
         state.conns[i] = kzalloc(sizeof(struct connection), GFP_KERNEL);
@@ -244,18 +192,19 @@ static int __init tcpuart_init(void) {
 static void __exit tcpuart_exit(void) {
     for (int i = 0; i < MAX_CONNS; i++) {
         if (state.conns[i]) {
-            conn_disconnect(state.conns[i]);
-            if (state.conns[i]->sock) {
-                conn_destroy(state.conns[i]);
-            }
+            conn_destroy(state.conns[i]);
             kfree(state.conns[i]);
         }
     }
 
+    tty_unregister_driver(state.tty_driver);
+    tty_driver_kref_put(state.tty_driver);
+
+    dev_t dev_num = state.ctl_cdev.dev;
     cdev_del(&state.ctl_cdev);
-    device_destroy(state.tcpuart_class, state.base_dev_num);
-    class_destroy(state.tcpuart_class);
-    unregister_chrdev_region(state.base_dev_num, MAX_DEVICES);
+    device_destroy(state.ctl_class, dev_num);
+    class_destroy(state.ctl_class);
+    unregister_chrdev_region(dev_num, MAX_DEVICES);
 }
 
 module_init(tcpuart_init);

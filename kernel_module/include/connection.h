@@ -1,52 +1,36 @@
 #ifndef _CONNECTION_H
 #define _CONNECTION_H
 
-#include <linux/cdev.h>
-#include <linux/fs.h>
+#include <linux/tty.h>
+#include <linux/workqueue.h>
 #include <net/sock.h>
-#include "message.h"
 #include "state.h"
 #include "tcpuart.h"
 
 struct connection {
-    struct cdev cdev;
-    struct device* device;
-    struct class* tcpuart_class;
-
     int minor;
-    int major;
 
     struct socket* sock;
+    void (*old_data_ready)(struct sock* sk);
+    uint32_t sock_addr;
+    uint16_t sock_port;
 
-    uint8_t read_data_buf[MAXIMUM_MESSAGE_SIZE];
-    size_t read_data_buf_len;
-    struct mutex read_mutex;
+    atomic_t active;
 
-    atomic_t disconnected;
-    atomic_t refcount;
+    struct work_struct rx_work;
+    struct tty_driver* driver;
+    struct tty_port port;
 };
 
-#define CONN_DELETED 1
-
 int conn_init(
-    struct connection* conn, int minor, uint32_t addr, uint16_t port,
-    const struct tcpuart_state* state
+    struct connection* conn, int minor, uint32_t addr, uint16_t port, struct tty_driver* driver
 );
 void conn_init_empty(struct connection* conn);
 
 int conn_avabile(struct connection* conn);
-int conn_alive(struct connection* conn);
-
-ssize_t conn_read(struct connection* conn, size_t count, char __user* dest_buf, int no_block);
-// Count must be < MAXIMUM_MESSAGE_SIZE
-int conn_write(struct connection* conn, size_t count, char* buf);
-
-int conn_open(struct connection* conn);
-void conn_close(struct connection* conn);
-
-void conn_disconnect(struct connection* conn);
 void conn_destroy(struct connection* conn);
 
+int conn_write(struct connection* conn, const unsigned char* buf, size_t count);
 int conn_get_info(struct connection* conn, struct tcpuart_server_info* info);
 
 #endif

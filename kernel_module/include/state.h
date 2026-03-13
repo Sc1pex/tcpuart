@@ -3,21 +3,21 @@
 
 #include <linux/cdev.h>
 #include <linux/mutex.h>
+#include <linux/tty_driver.h>
 
 #define MAX_DEVICES 16
 #define MAX_CONNS (MAX_DEVICES - 1)
 
 struct tcpuart_state {
-    dev_t base_dev_num;
-    struct class* tcpuart_class;
-
+    struct class* ctl_class;
     struct cdev ctl_cdev;
+    struct file_operations ctl_fops;
+
     struct connection* conns[MAX_CONNS];
 
-    struct file_operations ctl_fops;
-    struct file_operations conn_fops;
-
     struct mutex mutex;
+
+    struct tty_driver* tty_driver;
 };
 
 #endif

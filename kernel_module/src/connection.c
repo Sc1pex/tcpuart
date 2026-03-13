@@ -1,4 +1,9 @@
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include "connection.h"
+#include <linux/tty_flip.h>
+#include "message.h"
+#include "net/sock.h"
 
 static int create_tcp_socket(struct socket** sock, uint32_t addr, uint16_t port) {
     int rc = sock_create_kern(&init_net, AF_INET, SOCK_STREAM, IPPROTO_TCP, sock);
@@ -22,196 +27,148 @@ static int create_tcp_socket(struct socket** sock, uint32_t addr, uint16_t port)
     return 0;
 }
 
+static void conn_rx_work_handler(struct work_struct* work) {
+    struct connection* conn = container_of(work, struct connection, rx_work);
+
+    struct MessageHeader hdr;
+    uint8_t buf[MAXIMUM_MESSAGE_SIZE];
+
+    while (true) {
+        int ret = recv_message(&hdr, buf, conn->sock);
+        if (ret == -EAGAIN) {
+            break;
+        }
+        if (ret < 0) {
+            pr_info("socket error in rx_work: %d\n", ret);
+            break;
+        }
+
+        if (hdr.kind == MESSAGE_KIND_DATA) {
+            tty_insert_flip_string(&conn->port, buf, hdr.size);
+        }
+    }
+
+    tty_flip_buffer_push(&conn->port);
+}
+
+static void conn_data_ready(struct sock* sk) {
+    struct connection* conn = sk->sk_user_data;
+    schedule_work(&conn->rx_work);
+}
+
+static int conn_activate(struct tty_port* port, struct tty_struct* tty) {
+    struct connection* conn = container_of(port, struct connection, port);
+
+    int ret = create_tcp_socket(&conn->sock, conn->sock_addr, conn->sock_port);
+    if (ret) {
+        pr_err("Failed to connect to server\n");
+        return ret;
+    }
+
+    write_lock_bh(&conn->sock->sk->sk_callback_lock);
+    conn->old_data_ready = conn->sock->sk->sk_data_ready;
+    conn->sock->sk->sk_user_data = conn;
+    conn->sock->sk->sk_data_ready = conn_data_ready;
+    write_unlock_bh(&conn->sock->sk->sk_callback_lock);
+
+    return 0;
+}
+
+static void conn_shutdown(struct tty_port* port) {
+    struct connection* conn = container_of(port, struct connection, port);
+
+    if (!conn->sock) {
+        return;
+    }
+
+    write_lock_bh(&conn->sock->sk->sk_callback_lock);
+    conn->sock->sk->sk_data_ready = conn->old_data_ready;
+    conn->sock->sk->sk_user_data = NULL;
+    write_unlock_bh(&conn->sock->sk->sk_callback_lock);
+
+    cancel_work_sync(&conn->rx_work);
+    kernel_sock_shutdown(conn->sock, SHUT_RDWR);
+    sock_release(conn->sock);
+    conn->sock = NULL;
+}
+
+static const struct tty_port_operations port_ops = {
+    .activate = conn_activate,
+    .shutdown = conn_shutdown,
+};
+
 int conn_init(
-    struct connection* conn, int minor, uint32_t addr, uint16_t port,
-    const struct tcpuart_state* state
+    struct connection* conn, int minor, uint32_t addr, uint16_t port, struct tty_driver* driver
 ) {
-    conn->tcpuart_class = state->tcpuart_class;
-
     conn->minor = minor;
-    conn->major = MAJOR(state->base_dev_num);
+    conn->sock = NULL;
+    conn->old_data_ready = NULL;
+    conn->sock_addr = addr;
+    conn->sock_port = port;
+    conn->driver = driver;
 
-    // Try to connect to the socket
-    int rc = create_tcp_socket(&conn->sock, addr, port);
-    if (rc) {
-        pr_err("failed to connect to tcp server\n");
-        return rc;
+    tty_port_init(&conn->port);
+    conn->port.ops = &port_ops;
+    struct device* dev = tty_port_register_device(&conn->port, driver, minor, NULL);
+    if (IS_ERR(dev)) {
+        tty_port_destroy(&conn->port);
+        return PTR_ERR(dev);
     }
 
-    dev_t new_dev = MKDEV(MAJOR(state->base_dev_num), conn->minor);
-    cdev_init(&conn->cdev, &state->conn_fops);
-    if (cdev_add(&conn->cdev, new_dev, 1)) {
-        pr_err("failed to add cdev for conn\n");
-        sock_release(conn->sock);
-        return -ENOMEM;
-    }
-
-    conn->device =
-        device_create(state->tcpuart_class, NULL, new_dev, NULL, "tcpuart%d", conn->minor);
-    if (IS_ERR(conn->device)) {
-        pr_err("failed to create device for minor %d\n", conn->minor);
-        cdev_del(&conn->cdev);
-        sock_release(conn->sock);
-        return PTR_ERR(conn->device);
-    }
-
-    atomic_set(&conn->disconnected, false);
-    atomic_set(&conn->refcount, 1);
+    atomic_set(&conn->active, true);
+    INIT_WORK(&conn->rx_work, conn_rx_work_handler);
 
     return 0;
 }
 
 void conn_init_empty(struct connection* conn) {
-    atomic_set(&conn->disconnected, true);
-    mutex_init(&conn->read_mutex);
+    atomic_set(&conn->active, false);
 }
 
 int conn_avabile(struct connection* conn) {
-    return atomic_read(&conn->refcount) == 0;
+    return atomic_read(&conn->active) == false;
 }
 
-int conn_alive(struct connection* conn) {
-    if (atomic_read(&conn->refcount)) {
-        return !atomic_read(&conn->disconnected);
-    }
-    return false;
-}
+int conn_write(struct connection* conn, const unsigned char* buf, size_t count) {
+    ssize_t written_cnt = 0;
 
-ssize_t conn_read(struct connection* conn, size_t count, char __user* dest_buf, int no_block) {
-    mutex_lock(&conn->read_mutex);
+    while (count) {
+        size_t copy_cnt = min(count, MAXIMUM_MESSAGE_SIZE);
 
-    // First check if there is data left in the conn buffer
-    if (conn->read_data_buf_len) {
-        pr_info("Sending left ovevr data\n");
-        ssize_t send_cnt = min(count, conn->read_data_buf_len);
-        if (copy_to_user(dest_buf, conn->read_data_buf, send_cnt)) {
-            mutex_unlock(&conn->read_mutex);
-            return -EFAULT;
-        }
-
-        memmove(
-            conn->read_data_buf, conn->read_data_buf + send_cnt, conn->read_data_buf_len - send_cnt
-        );
-        conn->read_data_buf_len -= send_cnt;
-
-        mutex_unlock(&conn->read_mutex);
-        return send_cnt;
-    }
-
-    if (atomic_read(&conn->disconnected)) {
-        mutex_unlock(&conn->read_mutex);
-        // No more data will be coming in, return 0 to indicate EOF
-        return 0;
-    }
-
-    // No data in the buffer read from socket until we get a data message
-    struct MessageHeader hdr;
-    do {
-        pr_info("Reading from socket\n");
-        int ret = recv_message(&hdr, conn->read_data_buf, conn->sock, no_block);
+        struct MessageHeader hdr = {
+            .kind = MESSAGE_KIND_DATA,
+            .size = copy_cnt,
+        };
+        int ret = send_message(hdr, buf, conn->sock);
         if (ret) {
-            mutex_unlock(&conn->read_mutex);
-
-            if (ret == -EAGAIN) {
-                return ret;
-            } else if (ret == -ECONNRESET || ret == -EPIPE || ret == -ESHUTDOWN
-                       || ret == -ETIMEDOUT) {
-                pr_info("Socket was closed by peer\n");
-                conn_disconnect(conn);
-
-                return 0;
-            }
-
-            pr_err("Failed to receive message: %d\n", ret);
-            return ret;
-        }
-        conn->read_data_buf_len = hdr.size;
-    } while (hdr.kind != MESSAGE_KIND_DATA);
-
-    pr_info("Received data message of size: %zu\n", conn->read_data_buf_len);
-    ssize_t send_cnt = min(count, conn->read_data_buf_len);
-    if (copy_to_user(dest_buf, conn->read_data_buf, send_cnt)) {
-        mutex_unlock(&conn->read_mutex);
-        return -EFAULT;
-    }
-
-    memmove(
-        conn->read_data_buf, conn->read_data_buf + send_cnt, conn->read_data_buf_len - send_cnt
-    );
-    conn->read_data_buf_len -= send_cnt;
-
-    mutex_unlock(&conn->read_mutex);
-    return send_cnt;
-}
-
-int conn_write(struct connection* conn, size_t count, char* buf) {
-    if (atomic_read(&conn->disconnected)) {
-        return -EPIPE;
-    }
-
-    struct MessageHeader hdr = {
-        .kind = MESSAGE_KIND_DATA,
-        .size = count,
-    };
-
-    int ret = send_message(hdr, buf, conn->sock);
-
-    if (ret) {
-        if (ret == -ECONNRESET || ret == -EPIPE || ret == -ESHUTDOWN || ret == -ETIMEDOUT) {
-            pr_info("Socket was closed by peer\n");
-            conn_disconnect(conn);
             return ret;
         }
 
-        return ret;
+        count -= copy_cnt;
+        written_cnt += copy_cnt;
+        buf += copy_cnt;
     }
-    return 0;
-}
 
-int conn_open(struct connection* conn) {
-    if (!atomic_inc_not_zero(&conn->refcount)) {
-        return -ENOTCONN;
-    }
-    return 0;
-}
-
-void conn_close(struct connection* conn) {
-    if (atomic_dec_and_test(&conn->refcount)) {
-        conn_destroy(conn);
-    }
-}
-
-void conn_disconnect(struct connection* conn) {
-    if (atomic_cmpxchg(&conn->disconnected, false, true) == false) {
-        kernel_sock_shutdown(conn->sock, SHUT_RDWR);
-        cdev_del(&conn->cdev);
-        device_destroy(conn->tcpuart_class, MKDEV(conn->major, conn->minor));
-
-        if (atomic_dec_and_test(&conn->refcount)) {
-            conn_destroy(conn);
-        }
-    }
+    return written_cnt;
 }
 
 void conn_destroy(struct connection* conn) {
-    sock_release(conn->sock);
-    conn->sock = NULL;
-    conn->read_data_buf_len = 0;
+    if (atomic_read(&conn->active) == false) {
+        return;
+    }
+
+    tty_port_unregister_device(&conn->port, conn->driver, conn->minor);
+    tty_port_destroy(&conn->port);
+    atomic_set(&conn->active, false);
 }
 
 int conn_get_info(struct connection* conn, struct tcpuart_server_info* info) {
-    if (atomic_read(&conn->disconnected)) {
+    if (atomic_read(&conn->active) == false) {
         return -ENOTCONN;
     }
 
-    struct sockaddr_in saddr;
-    int ret = kernel_getpeername(conn->sock, (struct sockaddr*) &saddr);
-    if (ret < 0) {
-        return ret;
-    }
-
-    info->addr = saddr.sin_addr.s_addr;
-    info->port = saddr.sin_port;
+    info->addr = conn->sock_addr;
+    info->port = conn->sock_port;
 
     return 0;
 }

@@ -17,9 +17,7 @@ struct MessageHeader {
     uint16_t size;
 };
 
-int send_message(struct MessageHeader header, uint8_t* content, struct socket* socket);
-int recv_message(
-    struct MessageHeader* header, uint8_t* content, struct socket* socket, int noblock
-);
+int send_message(struct MessageHeader header, const uint8_t* content, struct socket* socket);
+int recv_message(struct MessageHeader* header, uint8_t* content, struct socket* socket);
 
 #endif

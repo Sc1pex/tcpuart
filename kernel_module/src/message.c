@@ -20,7 +20,7 @@ static int validate_header(struct MessageHeader header) {
     return 0;
 }
 
-int send_message(struct MessageHeader header, uint8_t* content, struct socket* socket) {
+int send_message(struct MessageHeader header, const uint8_t* content, struct socket* socket) {
     int res = validate_header(header);
     if (res) {
         return res;
@@ -31,7 +31,7 @@ int send_message(struct MessageHeader header, uint8_t* content, struct socket* s
     io[0].iov_base = &header;
     io[0].iov_len = sizeof(header);
 
-    io[1].iov_base = content;
+    io[1].iov_base = (void*) content;
     io[1].iov_len = header.size;
 
     struct msghdr msg = {};
@@ -46,20 +46,22 @@ int send_message(struct MessageHeader header, uint8_t* content, struct socket* s
     return 0;
 }
 
-int recv_message(
-    struct MessageHeader* header, uint8_t* content, struct socket* socket, int noblock
-) {
-    struct kvec io;
-    io.iov_base = header;
-    io.iov_len = sizeof(*header);
-
+int recv_message(struct MessageHeader* header, uint8_t* content, struct socket* socket) {
     struct msghdr msg = {};
-    msg.msg_flags = noblock ? MSG_DONTWAIT : MSG_WAITALL;
+    struct kvec io[2];
 
-    // Read the header
-    int res = kernel_recvmsg(socket, &msg, &io, 1, sizeof(*header), msg.msg_flags);
+    // First peek the header and data to ensure the entire message is available
+    io[0].iov_base = header;
+    io[0].iov_len = sizeof(*header);
+    int res = kernel_recvmsg(socket, &msg, io, 1, sizeof(*header), MSG_DONTWAIT | MSG_PEEK);
+    if (res < 0) {
+        return res;
+    }
+    if (res == 0) {
+        return -ECONNRESET;
+    }
     if (res != sizeof(*header)) {
-        return (res < 0) ? res : -EIO;
+        return -EAGAIN; // Not enough data for the header yet
     }
 
     from_network_order(header);
@@ -68,12 +70,24 @@ int recv_message(
         return res;
     }
 
-    // Read the rest of the message
-    io.iov_base = content;
-    io.iov_len = header->size;
-    msg.msg_flags = noblock ? MSG_DONTWAIT : MSG_WAITALL;
-    res = kernel_recvmsg(socket, &msg, &io, 1, header->size, msg.msg_flags);
-    if (res != header->size) {
+    // Peek the content
+    io[1].iov_base = content;
+    io[1].iov_len = header->size;
+    size_t total_len = sizeof(*header) + header->size;
+    res = kernel_recvmsg(socket, &msg, io, 2, total_len, MSG_DONTWAIT | MSG_PEEK);
+    if (res < 0) {
+        return res;
+    }
+    if (res == 0) {
+        return -ECONNRESET;
+    }
+    if (res != total_len) {
+        return -EAGAIN; // Not enough data for the content yet
+    }
+
+    // Consume the entire message
+    res = kernel_recvmsg(socket, &msg, io, 2, total_len, MSG_DONTWAIT);
+    if (res != total_len) {
         return (res < 0) ? res : -EIO;
     }
 
