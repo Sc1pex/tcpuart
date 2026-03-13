@@ -183,7 +183,6 @@ static int __init tcpuart_init(void) {
 
     for (int i = 0; i < MAX_CONNS; i++) {
         state.conns[i] = kzalloc(sizeof(struct connection), GFP_KERNEL);
-        conn_init_empty(state.conns[i]);
     }
 
     return 0;

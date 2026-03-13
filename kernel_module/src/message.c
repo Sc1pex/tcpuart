@@ -90,6 +90,7 @@ int recv_message(struct MessageHeader* header, uint8_t* content, struct socket* 
     if (res != total_len) {
         return (res < 0) ? res : -EIO;
     }
+    from_network_order(header);
 
     return 0;
 }

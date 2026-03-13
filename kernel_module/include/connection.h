@@ -7,6 +7,10 @@
 #include "state.h"
 #include "tcpuart.h"
 
+enum ConnectionFlags {
+    CONN_ACTIVE,
+};
+
 struct connection {
     int minor;
 
@@ -15,7 +19,7 @@ struct connection {
     uint32_t sock_addr;
     uint16_t sock_port;
 
-    atomic_t active;
+    unsigned long flags;
 
     struct work_struct rx_work;
     struct tty_driver* driver;
@@ -25,7 +29,6 @@ struct connection {
 int conn_init(
     struct connection* conn, int minor, uint32_t addr, uint16_t port, struct tty_driver* driver
 );
-void conn_init_empty(struct connection* conn);
 
 int conn_avabile(struct connection* conn);
 void conn_destroy(struct connection* conn);

@@ -115,18 +115,14 @@ int conn_init(
         return PTR_ERR(dev);
     }
 
-    atomic_set(&conn->active, true);
+    set_bit(CONN_ACTIVE, &conn->flags);
     INIT_WORK(&conn->rx_work, conn_rx_work_handler);
 
     return 0;
 }
 
-void conn_init_empty(struct connection* conn) {
-    atomic_set(&conn->active, false);
-}
-
 int conn_avabile(struct connection* conn) {
-    return atomic_read(&conn->active) == false;
+    return !test_bit(CONN_ACTIVE, &conn->flags);
 }
 
 int conn_write(struct connection* conn, const unsigned char* buf, size_t count) {
@@ -153,17 +149,17 @@ int conn_write(struct connection* conn, const unsigned char* buf, size_t count) 
 }
 
 void conn_destroy(struct connection* conn) {
-    if (atomic_read(&conn->active) == false) {
+    if (!test_bit(CONN_ACTIVE, &conn->flags)) {
         return;
     }
 
     tty_port_unregister_device(&conn->port, conn->driver, conn->minor);
     tty_port_destroy(&conn->port);
-    atomic_set(&conn->active, false);
+    clear_bit(CONN_ACTIVE, &conn->flags);
 }
 
 int conn_get_info(struct connection* conn, struct tcpuart_server_info* info) {
-    if (atomic_read(&conn->active) == false) {
+    if (!test_bit(CONN_ACTIVE, &conn->flags)) {
         return -ENOTCONN;
     }
 
