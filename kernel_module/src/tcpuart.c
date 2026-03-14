@@ -7,32 +7,31 @@
 #include <linux/module.h>
 #include <linux/tty.h>
 #include "connection.h"
-#include "message.h"
 #include "state.h"
 
 static struct tcpuart_state state;
 
 static int handle_connect_to_ioctl(const struct tcpuart_connect_to* conn_cmd) {
-    if (mutex_lock_interruptible(&state.mutex)) {
+    if (mutex_lock_interruptible(&state.table.mutex)) {
         return -EINTR;
     }
     // Try to find a minor device for connection
     int conn_idx = 0;
     for (; conn_idx < MAX_CONNS; conn_idx++) {
-        if (conn_avabile(state.conns[conn_idx])) {
+        if (conn_avabile(state.table.conns[conn_idx])) {
             break;
         }
     }
     if (conn_idx == MAX_CONNS) {
         pr_err("no free connection slot\n");
-        mutex_unlock(&state.mutex);
+        mutex_unlock(&state.table.mutex);
         return -ENOSPC;
     }
 
     int ret = conn_init(
-        state.conns[conn_idx], conn_idx + 1, conn_cmd->addr, conn_cmd->port, state.tty_driver
+        state.table.conns[conn_idx], conn_idx + 1, conn_cmd->addr, conn_cmd->port, state.tty_driver
     );
-    mutex_unlock(&state.mutex);
+    mutex_unlock(&state.table.mutex);
 
     if (ret) {
         return ret;
@@ -50,18 +49,18 @@ static int handle_get_server_info(struct tcpuart_server_info* info) {
         return -EINVAL;
     }
 
-    if (mutex_lock_interruptible(&state.mutex)) {
+    if (mutex_lock_interruptible(&state.table.mutex)) {
         return -EINTR;
     }
 
-    struct connection* conn = state.conns[info->minor - 1];
+    struct connection* conn = state.table.conns[info->minor - 1];
     if (conn_avabile(conn)) {
-        mutex_unlock(&state.mutex);
+        mutex_unlock(&state.table.mutex);
         return -ENODEV;
     }
 
     int ret = conn_get_info(conn, info);
-    mutex_unlock(&state.mutex);
+    mutex_unlock(&state.table.mutex);
 
     return ret;
 }
@@ -122,8 +121,8 @@ static int handle_conn_open(struct tty_struct* tty, struct file* file) {
         return -ENODEV;
     }
 
-    tty->driver_data = state.conns[minor - 1];
-    return tty_port_open(&state.conns[minor - 1]->port, tty, file);
+    tty->driver_data = state.table.conns[minor - 1];
+    return tty_port_open(&state.table.conns[minor - 1]->port, tty, file);
 }
 
 static void handle_conn_close(struct tty_struct* tty, struct file* file) {
@@ -144,7 +143,7 @@ static const struct tty_operations conn_ops = {
 };
 
 static int __init tcpuart_init(void) {
-    mutex_init(&state.mutex);
+    mutex_init(&state.table.mutex);
 
     state.ctl_fops.owner = THIS_MODULE;
     state.ctl_fops.unlocked_ioctl = handle_ctl_ioctl;
@@ -179,7 +178,7 @@ static int __init tcpuart_init(void) {
     tty_register_driver(state.tty_driver);
 
     for (int i = 0; i < MAX_CONNS; i++) {
-        state.conns[i] = kzalloc(sizeof(struct connection), GFP_KERNEL);
+        state.table.conns[i] = kzalloc(sizeof(struct connection), GFP_KERNEL);
     }
 
     return 0;
@@ -187,9 +186,9 @@ static int __init tcpuart_init(void) {
 
 static void __exit tcpuart_exit(void) {
     for (int i = 0; i < MAX_CONNS; i++) {
-        if (state.conns[i]) {
-            conn_destroy(state.conns[i]);
-            kfree(state.conns[i]);
+        if (state.table.conns[i]) {
+            conn_destroy(state.table.conns[i]);
+            kfree(state.table.conns[i]);
         }
     }
 
