@@ -10,6 +10,7 @@
 enum ConnectionFlags {
     CONN_ACTIVE,
     CONN_CONNECTED,
+    CONN_THROTTLED,
 };
 
 struct connection {

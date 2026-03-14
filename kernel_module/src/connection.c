@@ -34,6 +34,9 @@ static void conn_rx_work_handler(struct work_struct* work) {
     uint8_t buf[MAXIMUM_MESSAGE_SIZE];
 
     while (true) {
+        if (test_bit(CONN_THROTTLED, &conn->flags)) {
+            break;
+        }
         if (!test_bit(CONN_CONNECTED, &conn->flags)) {
             break;
         }
@@ -209,11 +212,24 @@ static unsigned int conn_write_room(struct tty_struct* tty) {
     return MAXIMUM_MESSAGE_SIZE;
 }
 
+static void conn_throttle(struct tty_struct* tty) {
+    struct connection* conn = tty->driver_data;
+    set_bit(CONN_THROTTLED, &conn->flags);
+}
+
+static void conn_unthrottle(struct tty_struct* tty) {
+    struct connection* conn = tty->driver_data;
+    clear_bit(CONN_THROTTLED, &conn->flags);
+    schedule_work(&conn->rx_work);
+}
+
 static const struct tty_operations conn_ops = {
     .open = conn_open,
     .close = conn_close,
     .write = conn_write,
     .write_room = conn_write_room,
+    .throttle = conn_throttle,
+    .unthrottle = conn_unthrottle,
 };
 
 const struct tty_operations* conn_get_tty_ops(void) {
