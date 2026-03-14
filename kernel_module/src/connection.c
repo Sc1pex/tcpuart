@@ -134,7 +134,47 @@ int conn_avabile(struct connection* conn) {
     return !test_bit(CONN_ACTIVE, &conn->flags);
 }
 
-int conn_write(struct connection* conn, const unsigned char* buf, size_t count) {
+void conn_destroy(struct connection* conn) {
+    if (!test_bit(CONN_ACTIVE, &conn->flags)) {
+        return;
+    }
+
+    tty_port_unregister_device(&conn->port, conn->driver, conn->minor);
+    tty_port_destroy(&conn->port);
+    clear_bit(CONN_ACTIVE, &conn->flags);
+    clear_bit(CONN_CONNECTED, &conn->flags);
+}
+
+int conn_get_info(struct connection* conn, struct tcpuart_server_info* info) {
+    if (!test_bit(CONN_ACTIVE, &conn->flags)) {
+        return -ENOTCONN;
+    }
+
+    info->addr = conn->sock_addr;
+    info->port = conn->sock_port;
+
+    return 0;
+}
+
+static int conn_open(struct tty_struct* tty, struct file* file) {
+    int minor = tty->index;
+    if (minor < 1 || minor > MAX_CONNS) {
+        return -ENODEV;
+    }
+    struct conn_table* table = tty->driver->driver_state;
+
+    tty->driver_data = table->conns[minor - 1];
+    return tty_port_open(&table->conns[minor - 1]->port, tty, file);
+}
+
+static void conn_close(struct tty_struct* tty, struct file* file) {
+    struct connection* conn = tty->driver_data;
+    tty_port_close(&conn->port, tty, file);
+}
+
+static ssize_t conn_write(struct tty_struct* tty, const unsigned char* buf, size_t count) {
+    struct connection* conn = tty->driver_data;
+
     if (!test_bit(CONN_CONNECTED, &conn->flags)) {
         return -ENOTCONN;
     }
@@ -161,31 +201,21 @@ int conn_write(struct connection* conn, const unsigned char* buf, size_t count) 
     return written_cnt;
 }
 
-unsigned int conn_write_room(struct connection* conn) {
+static unsigned int conn_write_room(struct tty_struct* tty) {
+    struct connection* conn = tty->driver_data;
     if (!test_bit(CONN_CONNECTED, &conn->flags)) {
         return 0;
     }
     return MAXIMUM_MESSAGE_SIZE;
 }
 
-void conn_destroy(struct connection* conn) {
-    if (!test_bit(CONN_ACTIVE, &conn->flags)) {
-        return;
-    }
+static const struct tty_operations conn_ops = {
+    .open = conn_open,
+    .close = conn_close,
+    .write = conn_write,
+    .write_room = conn_write_room,
+};
 
-    tty_port_unregister_device(&conn->port, conn->driver, conn->minor);
-    tty_port_destroy(&conn->port);
-    clear_bit(CONN_ACTIVE, &conn->flags);
-    clear_bit(CONN_CONNECTED, &conn->flags);
-}
-
-int conn_get_info(struct connection* conn, struct tcpuart_server_info* info) {
-    if (!test_bit(CONN_ACTIVE, &conn->flags)) {
-        return -ENOTCONN;
-    }
-
-    info->addr = conn->sock_addr;
-    info->port = conn->sock_port;
-
-    return 0;
+const struct tty_operations* conn_get_tty_ops(void) {
+    return &conn_ops;
 }

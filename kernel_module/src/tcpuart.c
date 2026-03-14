@@ -110,38 +110,6 @@ static char* tcpuart_devnode(const struct device* dev, umode_t* mode) {
     return NULL;
 }
 
-static ssize_t handle_conn_write(struct tty_struct* tty, const unsigned char* buf, size_t count) {
-    struct connection* conn = tty->driver_data;
-    return conn_write(conn, buf, count);
-}
-
-static int handle_conn_open(struct tty_struct* tty, struct file* file) {
-    int minor = tty->index;
-    if (minor < 1 || minor > MAX_CONNS) {
-        return -ENODEV;
-    }
-
-    tty->driver_data = state.table.conns[minor - 1];
-    return tty_port_open(&state.table.conns[minor - 1]->port, tty, file);
-}
-
-static void handle_conn_close(struct tty_struct* tty, struct file* file) {
-    struct connection* conn = tty->driver_data;
-    tty_port_close(&conn->port, tty, file);
-}
-
-static unsigned int handle_conn_write_room(struct tty_struct* tty) {
-    struct connection* conn = tty->driver_data;
-    return conn_write_room(conn);
-}
-
-static const struct tty_operations conn_ops = {
-    .open = handle_conn_open,
-    .close = handle_conn_close,
-    .write = handle_conn_write,
-    .write_room = handle_conn_write_room,
-};
-
 static int __init tcpuart_init(void) {
     mutex_init(&state.table.mutex);
 
@@ -173,13 +141,15 @@ static int __init tcpuart_init(void) {
     state.tty_driver->type = TTY_DRIVER_TYPE_SERIAL;
     state.tty_driver->subtype = SERIAL_TYPE_NORMAL;
     state.tty_driver->init_termios = tty_std_termios;
-    state.tty_driver->ops = &conn_ops;
+    state.tty_driver->ops = conn_get_tty_ops();
 
     tty_register_driver(state.tty_driver);
 
     for (int i = 0; i < MAX_CONNS; i++) {
         state.table.conns[i] = kzalloc(sizeof(struct connection), GFP_KERNEL);
     }
+
+    state.tty_driver->driver_state = &state.table;
 
     return 0;
 }

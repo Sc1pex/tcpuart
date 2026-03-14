@@ -30,13 +30,11 @@ struct connection {
 int conn_init(
     struct connection* conn, int minor, uint32_t addr, uint16_t port, struct tty_driver* driver
 );
-
-int conn_avabile(struct connection* conn);
 void conn_destroy(struct connection* conn);
 
-int conn_write(struct connection* conn, const unsigned char* buf, size_t count);
-unsigned int conn_write_room(struct connection* conn);
-
+int conn_avabile(struct connection* conn);
 int conn_get_info(struct connection* conn, struct tcpuart_server_info* info);
+
+const struct tty_operations* conn_get_tty_ops(void);
 
 #endif
