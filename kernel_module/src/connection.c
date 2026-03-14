@@ -34,6 +34,10 @@ static void conn_rx_work_handler(struct work_struct* work) {
     uint8_t buf[MAXIMUM_MESSAGE_SIZE];
 
     while (true) {
+        if (!test_bit(CONN_CONNECTED, &conn->flags)) {
+            break;
+        }
+
         int ret = recv_message(&hdr, buf, conn->sock);
         if (ret == -EAGAIN) {
             break;
@@ -71,6 +75,8 @@ static int conn_activate(struct tty_port* port, struct tty_struct* tty) {
     conn->sock->sk->sk_data_ready = conn_data_ready;
     write_unlock_bh(&conn->sock->sk->sk_callback_lock);
 
+    set_bit(CONN_CONNECTED, &conn->flags);
+
     return 0;
 }
 
@@ -90,6 +96,8 @@ static void conn_shutdown(struct tty_port* port) {
     kernel_sock_shutdown(conn->sock, SHUT_RDWR);
     sock_release(conn->sock);
     conn->sock = NULL;
+
+    clear_bit(CONN_CONNECTED, &conn->flags);
 }
 
 static const struct tty_port_operations port_ops = {
@@ -106,6 +114,7 @@ int conn_init(
     conn->sock_addr = addr;
     conn->sock_port = port;
     conn->driver = driver;
+    conn->flags = 0;
 
     tty_port_init(&conn->port);
     conn->port.ops = &port_ops;
@@ -126,6 +135,10 @@ int conn_avabile(struct connection* conn) {
 }
 
 int conn_write(struct connection* conn, const unsigned char* buf, size_t count) {
+    if (!test_bit(CONN_CONNECTED, &conn->flags)) {
+        return -ENOTCONN;
+    }
+
     ssize_t written_cnt = 0;
 
     while (count) {
@@ -148,6 +161,13 @@ int conn_write(struct connection* conn, const unsigned char* buf, size_t count) 
     return written_cnt;
 }
 
+unsigned int conn_write_room(struct connection* conn) {
+    if (!test_bit(CONN_CONNECTED, &conn->flags)) {
+        return 0;
+    }
+    return MAXIMUM_MESSAGE_SIZE;
+}
+
 void conn_destroy(struct connection* conn) {
     if (!test_bit(CONN_ACTIVE, &conn->flags)) {
         return;
@@ -156,6 +176,7 @@ void conn_destroy(struct connection* conn) {
     tty_port_unregister_device(&conn->port, conn->driver, conn->minor);
     tty_port_destroy(&conn->port);
     clear_bit(CONN_ACTIVE, &conn->flags);
+    clear_bit(CONN_CONNECTED, &conn->flags);
 }
 
 int conn_get_info(struct connection* conn, struct tcpuart_server_info* info) {

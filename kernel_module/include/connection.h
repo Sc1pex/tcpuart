@@ -9,6 +9,7 @@
 
 enum ConnectionFlags {
     CONN_ACTIVE,
+    CONN_CONNECTED,
 };
 
 struct connection {
@@ -34,6 +35,8 @@ int conn_avabile(struct connection* conn);
 void conn_destroy(struct connection* conn);
 
 int conn_write(struct connection* conn, const unsigned char* buf, size_t count);
+unsigned int conn_write_room(struct connection* conn);
+
 int conn_get_info(struct connection* conn, struct tcpuart_server_info* info);
 
 #endif

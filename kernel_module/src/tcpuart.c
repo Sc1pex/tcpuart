@@ -133,10 +133,7 @@ static void handle_conn_close(struct tty_struct* tty, struct file* file) {
 
 static unsigned int handle_conn_write_room(struct tty_struct* tty) {
     struct connection* conn = tty->driver_data;
-    if (!conn->sock) {
-        return 0;
-    }
-    return MAXIMUM_MESSAGE_SIZE;
+    return conn_write_room(conn);
 }
 
 static const struct tty_operations conn_ops = {
