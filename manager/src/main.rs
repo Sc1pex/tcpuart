@@ -4,6 +4,8 @@ use std::net::Ipv4Addr;
 
 mod ioctl;
 
+const MAX_CONNS: u32 = 15;
+
 #[derive(Parser)]
 struct Cli {
     #[command(subcommand)]
@@ -114,6 +116,29 @@ fn get_server_info(minor: u32) -> std::io::Result<()> {
     Ok(())
 }
 
+fn list_devices() -> std::io::Result<()> {
+    let ctl_device = open_ctl_device()?;
+    let mut found = 0u32;
+
+    for minor in 1..=MAX_CONNS {
+        match ioctl::get_server_info(&ctl_device, minor) {
+            Ok(info) => {
+                let ip = Ipv4Addr::from(info.addr);
+                println!("/dev/tcpuart{minor} -> {ip}:{}", info.port);
+                found += 1;
+            }
+            Err(ioctl::IoctlError::DeviceNotFound) => continue,
+            Err(err) => return Err(get_server_error_to_io(minor, err)),
+        }
+    }
+
+    if found == 0 {
+        println!("No active devices");
+    }
+
+    Ok(())
+}
+
 fn run() -> std::io::Result<()> {
     let cli = Cli::parse();
 
@@ -121,10 +146,7 @@ fn run() -> std::io::Result<()> {
         Commands::Connect { addr, port } => connect_device(addr, port),
         Commands::Destroy { minor } => destroy_device(minor),
         Commands::GetServer { minor } => get_server_info(minor),
-        Commands::List => {
-            println!("Listing all connected devices");
-            todo!()
-        }
+        Commands::List => list_devices(),
     }
 }
 
