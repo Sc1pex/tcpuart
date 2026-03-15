@@ -179,6 +179,7 @@ int conn_get_info(struct connection* conn, struct tcpuart_server_info* info) {
 
     info->addr = conn->sock_addr;
     info->port = conn->sock_port;
+    info->connected = test_bit(CONN_CONNECTED, &conn->flags) ? 1 : 0;
 
     return 0;
 }

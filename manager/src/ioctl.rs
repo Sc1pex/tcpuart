@@ -12,6 +12,7 @@ pub struct ServerInfo {
     pub minor: u32,
     pub addr: u32,
     pub port: u16,
+    pub connected: u8,
 }
 
 mod raw {
@@ -66,6 +67,7 @@ pub fn get_server_info(file: &std::fs::File, minor: u32) -> Result<ServerInfo, I
         minor,
         addr: 0,
         port: 0,
+        connected: 0,
     };
     match unsafe { raw::tcpuart_get_server_info(file.as_raw_fd(), &mut info) } {
         Ok(_) => {

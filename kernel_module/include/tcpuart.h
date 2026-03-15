@@ -26,6 +26,8 @@ struct tcpuart_server_info {
     uint32_t addr;
     // Network byte order
     uint16_t port;
+    // 1 if TCP connection is currently active, 0 otherwise
+    uint8_t connected;
 };
 
 #define TCPUART_GET_SERVER_INFO _IOWR(TCPUART_MAGIC, 1, struct tcpuart_server_info)

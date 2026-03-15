@@ -20,8 +20,8 @@ enum Commands {
     /// Try to destroy the device with the specified minor number
     Destroy { minor: u64 },
 
-    /// Get the server ip and port for the device with the specified minor number
-    GetServer { minor: u32 },
+    /// Show status for the device with the specified minor number
+    Status { minor: u32 },
 
     /// List all connected devices
     List,
@@ -62,7 +62,7 @@ fn destroy_error_to_io(minor: u64, err: ioctl::IoctlError) -> io::Error {
     }
 }
 
-fn get_server_error_to_io(minor: u32, err: ioctl::IoctlError) -> io::Error {
+fn get_status_error_to_io(minor: u32, err: ioctl::IoctlError) -> io::Error {
     match err {
         ioctl::IoctlError::DeviceNotFound => io::Error::new(
             io::ErrorKind::NotFound,
@@ -103,15 +103,20 @@ fn destroy_device(minor: u64) -> std::io::Result<()> {
     Ok(())
 }
 
-fn get_server_info(minor: u32) -> std::io::Result<()> {
+fn show_status(minor: u32) -> std::io::Result<()> {
     let ctl_device = open_ctl_device()?;
 
     let info = ioctl::get_server_info(&ctl_device, minor)
-        .map_err(|err| get_server_error_to_io(minor, err))?;
+        .map_err(|err| get_status_error_to_io(minor, err))?;
     let ip = Ipv4Addr::from(info.addr);
+    let status = if info.connected != 0 {
+        "connected"
+    } else {
+        "disconnected"
+    };
     println!(
-        "Device /dev/tcpuart{minor} is connected to {ip}:{}",
-        info.port
+        "Device /dev/tcpuart{minor} -> {ip}:{} ({status})",
+        info.port,
     );
     Ok(())
 }
@@ -124,11 +129,16 @@ fn list_devices() -> std::io::Result<()> {
         match ioctl::get_server_info(&ctl_device, minor) {
             Ok(info) => {
                 let ip = Ipv4Addr::from(info.addr);
-                println!("/dev/tcpuart{minor} -> {ip}:{}", info.port);
+                let status = if info.connected != 0 {
+                    "connected"
+                } else {
+                    "disconnected"
+                };
+                println!("/dev/tcpuart{minor} -> {ip}:{} ({status})", info.port);
                 found += 1;
             }
             Err(ioctl::IoctlError::DeviceNotFound) => continue,
-            Err(err) => return Err(get_server_error_to_io(minor, err)),
+            Err(err) => return Err(get_status_error_to_io(minor, err)),
         }
     }
 
@@ -145,7 +155,7 @@ fn run() -> std::io::Result<()> {
     match cli.command {
         Commands::Connect { addr, port } => connect_device(addr, port),
         Commands::Destroy { minor } => destroy_device(minor),
-        Commands::GetServer { minor } => get_server_info(minor),
+        Commands::Status { minor } => show_status(minor),
         Commands::List => list_devices(),
     }
 }
