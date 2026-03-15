@@ -246,6 +246,62 @@ static void conn_unthrottle(struct tty_struct* tty) {
     schedule_work(&conn->rx_work);
 }
 
+static void conn_set_termios(struct tty_struct* tty, const struct ktermios* old) {
+    struct connection* conn = tty->driver_data;
+
+    if (!test_bit(CONN_CONNECTED, &conn->flags)) {
+        if (old) {
+            tty->termios = *old;
+        }
+        return;
+    }
+
+    struct MessageConfigData cfg = {};
+    cfg.baud = htonl(tty_get_baud_rate(tty));
+
+    switch (tty->termios.c_cflag & CSIZE) {
+    case CS5:
+        cfg.data_bits = 5;
+        break;
+    case CS6:
+        cfg.data_bits = 6;
+        break;
+    case CS7:
+        cfg.data_bits = 7;
+        break;
+    case CS8:
+        cfg.data_bits = 8;
+        break;
+    default:
+        pr_err("Invalid data bits\n");
+        return;
+    }
+
+    cfg.stop_bits = (tty->termios.c_cflag & CSTOPB) ? 2 : 1;
+
+    if (tty->termios.c_cflag & PARENB) {
+        if (tty->termios.c_cflag & PARODD) {
+            cfg.parity = MESSAGE_CONFIG_PARITY_ODD;
+        } else {
+            cfg.parity = MESSAGE_CONFIG_PARITY_EVEN;
+        }
+    } else {
+        cfg.parity = MESSAGE_CONFIG_PARITY_NONE;
+    }
+
+    struct MessageHeader hdr = {
+        .kind = MESSAGE_KIND_CONFIG,
+        .size = sizeof(cfg),
+    };
+    int ret = send_message(hdr, (const uint8_t*) &cfg, conn->sock);
+    if (ret < 0) {
+        if (old) {
+            tty->termios = *old;
+        }
+        handle_lost_connection(conn);
+    }
+}
+
 static const struct tty_operations conn_ops = {
     .open = conn_open,
     .close = conn_close,
@@ -253,6 +309,7 @@ static const struct tty_operations conn_ops = {
     .write_room = conn_write_room,
     .throttle = conn_throttle,
     .unthrottle = conn_unthrottle,
+    .set_termios = conn_set_termios,
 };
 
 const struct tty_operations* conn_get_tty_ops(void) {
