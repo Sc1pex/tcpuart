@@ -62,7 +62,7 @@ static void conn_rx_work_handler(struct work_struct* work) {
         int ret = recv_message(&hdr, buf, conn->sock);
         if (ret == -EAGAIN || ret == -EINTR) {
             break;
-        } else if (ret <= 0) {
+        } else if (ret < 0) {
             handle_lost_connection(conn);
             break;
         }
@@ -253,6 +253,9 @@ static void conn_set_termios(struct tty_struct* tty, const struct ktermios* old)
         if (old) {
             tty->termios = *old;
         }
+        return;
+    }
+    if (old && !tty_termios_hw_change(old, &tty->termios)) {
         return;
     }
 
