@@ -45,7 +45,6 @@ static int handle_connect_to_ioctl(const struct tcpuart_connect_to* conn_cmd) {
 
 static int handle_get_server_info(struct tcpuart_server_info* info) {
     if (info->minor < 1 || info->minor > MAX_CONNS) {
-        pr_err("invalid minor number: %d\n", info->minor);
         return -EINVAL;
     }
 
@@ -63,6 +62,31 @@ static int handle_get_server_info(struct tcpuart_server_info* info) {
     mutex_unlock(&state.table.mutex);
 
     return ret;
+}
+
+static int handle_try_destroy(unsigned int minor) {
+    if (minor < 1 || minor > MAX_CONNS) {
+        return -EINVAL;
+    }
+
+    if (mutex_lock_interruptible(&state.table.mutex)) {
+        return -EINTR;
+    }
+
+    struct connection* conn = state.table.conns[minor - 1];
+    if (conn_avabile(conn)) {
+        mutex_unlock(&state.table.mutex);
+        return -ENODEV;
+    }
+    if (conn_in_use(conn)) {
+        mutex_unlock(&state.table.mutex);
+        return -EBUSY;
+    }
+    conn_destroy(conn);
+
+    mutex_unlock(&state.table.mutex);
+
+    return 0;
 }
 
 static long handle_ctl_ioctl(struct file* file, unsigned int cmd, unsigned long arg) {
@@ -95,6 +119,10 @@ static long handle_ctl_ioctl(struct file* file, unsigned int cmd, unsigned long 
         }
 
         return 0;
+    }
+
+    case TCPUART_TRY_DESTROY: {
+        return handle_try_destroy(arg);
     }
 
     default:

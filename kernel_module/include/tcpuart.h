@@ -30,4 +30,7 @@ struct tcpuart_server_info {
 
 #define TCPUART_GET_SERVER_INFO _IOWR(TCPUART_MAGIC, 1, struct tcpuart_server_info)
 
+// Destroy the connection with the given minor if there are no processes using it
+#define TCPUART_TRY_DESTROY _IOW(TCPUART_MAGIC, 2, unsigned int)
+
 #endif

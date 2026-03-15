@@ -34,6 +34,8 @@ int conn_init(
 void conn_destroy(struct connection* conn);
 
 int conn_avabile(struct connection* conn);
+int conn_in_use(struct connection* conn);
+
 int conn_get_info(struct connection* conn, struct tcpuart_server_info* info);
 
 const struct tty_operations* conn_get_tty_ops(void);

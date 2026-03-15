@@ -157,6 +157,10 @@ int conn_avabile(struct connection* conn) {
     return !test_bit(CONN_ACTIVE, &conn->flags);
 }
 
+int conn_in_use(struct connection* conn) {
+    return test_bit(CONN_CONNECTED, &conn->flags);
+}
+
 void conn_destroy(struct connection* conn) {
     if (!test_bit(CONN_ACTIVE, &conn->flags)) {
         return;
