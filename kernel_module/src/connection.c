@@ -27,6 +27,24 @@ static int create_tcp_socket(struct socket** sock, uint32_t addr, uint16_t port)
     return 0;
 }
 
+static void handle_lost_connection(struct connection* conn) {
+    if (!test_and_clear_bit(CONN_CONNECTED, &conn->flags)) {
+        return;
+    }
+
+    if (conn->sock) {
+        write_lock_bh(&conn->sock->sk->sk_callback_lock);
+        conn->sock->sk->sk_data_ready = conn->old_data_ready;
+        conn->sock->sk->sk_user_data = NULL;
+        write_unlock_bh(&conn->sock->sk->sk_callback_lock);
+
+        sock_release(conn->sock);
+        conn->sock = NULL;
+    }
+
+    tty_port_tty_hangup(&conn->port, false);
+}
+
 static void conn_rx_work_handler(struct work_struct* work) {
     struct connection* conn = container_of(work, struct connection, rx_work);
 
@@ -42,16 +60,18 @@ static void conn_rx_work_handler(struct work_struct* work) {
         }
 
         int ret = recv_message(&hdr, buf, conn->sock);
-        if (ret == -EAGAIN) {
+        if (ret == -EAGAIN || ret == -EINTR) {
             break;
-        }
-        if (ret < 0) {
-            pr_info("socket error in rx_work: %d\n", ret);
+        } else if (ret <= 0) {
+            handle_lost_connection(conn);
             break;
         }
 
         if (hdr.kind == MESSAGE_KIND_DATA) {
-            tty_insert_flip_string(&conn->port, buf, hdr.size);
+            size_t ret = tty_insert_flip_string(&conn->port, buf, hdr.size);
+            if (ret != hdr.size) {
+                pr_err("Partial read. Lost %zu bytes of data", hdr.size - ret);
+            }
         }
     }
 
@@ -179,7 +199,7 @@ static ssize_t conn_write(struct tty_struct* tty, const unsigned char* buf, size
     struct connection* conn = tty->driver_data;
 
     if (!test_bit(CONN_CONNECTED, &conn->flags)) {
-        return -ENOTCONN;
+        return -EIO;
     }
 
     ssize_t written_cnt = 0;
@@ -192,7 +212,10 @@ static ssize_t conn_write(struct tty_struct* tty, const unsigned char* buf, size
             .size = copy_cnt,
         };
         int ret = send_message(hdr, buf, conn->sock);
-        if (ret) {
+        if (ret < 0) {
+            if (ret != -EAGAIN && ret != -EINTR) {
+                handle_lost_connection(conn);
+            }
             return ret;
         }
 
