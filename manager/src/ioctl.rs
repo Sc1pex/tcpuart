@@ -21,7 +21,7 @@ mod raw {
     const TCPUART_IOC_MAGIC: u8 = b'T';
     const TCPUART_CONNECT_TO: u8 = 0;
     const TCPUART_GET_SERVER_INFO: u8 = 1;
-    const TCPUART_TRY_DISCONNECT: u8 = 2;
+    const TCPUART_TRY_DESTROY: u8 = 2;
 
     ioctl_write_ptr!(
         tcpuart_connect_to,
@@ -38,9 +38,9 @@ mod raw {
     );
 
     ioctl_write_int!(
-        tcpuart_try_disconnect,
+        tcpuart_try_destroy,
         TCPUART_IOC_MAGIC,
-        TCPUART_TRY_DISCONNECT
+        TCPUART_TRY_DESTROY
     );
 }
 
@@ -78,8 +78,8 @@ pub fn get_server_info(file: &std::fs::File, minor: u32) -> Result<ServerInfo, I
     }
 }
 
-pub fn disconnect(file: &std::fs::File, minor: u64) -> Result<(), IoctlError> {
-    match unsafe { raw::tcpuart_try_disconnect(file.as_raw_fd(), minor) } {
+pub fn destroy(file: &std::fs::File, minor: u64) -> Result<(), IoctlError> {
+    match unsafe { raw::tcpuart_try_destroy(file.as_raw_fd(), minor) } {
         Ok(_) => Ok(()),
         Err(Errno::ENODEV) => Err(IoctlError::DeviceNotFound),
         Err(Errno::EBUSY) => Err(IoctlError::DeviceBusy),
