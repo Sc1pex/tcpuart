@@ -33,6 +33,13 @@ struct MessageHeader {
     }
 };
 
+struct MessageConfigData {
+    uint32_t baud;
+    uint8_t data_bits;
+    uint8_t stop_bits;
+    uint8_t parity;
+};
+
 enum class ParseMessageResult {
     Success,
     NotEnoughData,

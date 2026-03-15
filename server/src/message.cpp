@@ -20,13 +20,9 @@ ParseMessageResult readMessage(WiFiClient& client, MessageHeader& header, uint8_
     header = MessageHeader(header_buf);
 
     if (header.kind >= MessageKind_Count) {
-        Serial.print("Invalid message kind: ");
-        Serial.println(header.kind);
         return ParseMessageResult::InvalidKind;
     }
     if (header.size > MAX_MESSAGE_SIZE) {
-        Serial.print("Invalid message size: ");
-        Serial.println(header.size);
         return ParseMessageResult::InvalidSize;
     }
 
