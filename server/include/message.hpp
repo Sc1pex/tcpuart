@@ -37,6 +37,7 @@ enum class ParseMessageResult {
     NotEnoughData,
     InvalidKind,
     InvalidSize,
+    ReadError,
 };
 
 void sendMessage(WiFiClient& client, MessageHeader header, const uint8_t* message);

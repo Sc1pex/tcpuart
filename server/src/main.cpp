@@ -17,9 +17,6 @@ void setup() {
     server.setNoDelay(true);
 }
 
-uint8_t message_buf[MAX_MESSAGE_SIZE];
-uint8_t serial_buf[128];
-
 WiFiClient client;
 
 SerialConfig cfgToSerialConfig(MessageConfigData* cfg) {
@@ -62,7 +59,7 @@ SerialConfig cfgToSerialConfig(MessageConfigData* cfg) {
 
 void handle_message(MessageHeader header, uint8_t* buf) {
     if (header.kind == MessageKindData) {
-        Serial.printf("%.*s", header.size, message_buf);
+        Serial.write(buf, header.size);
     } else if (header.kind == MessageKindConfig) {
         MessageConfigData* cfg = (MessageConfigData*) buf;
         cfg->baud = ntohl(cfg->baud);
@@ -70,6 +67,9 @@ void handle_message(MessageHeader header, uint8_t* buf) {
         Serial.begin(cfg->baud, cfgToSerialConfig(cfg));
     }
 }
+
+uint8_t message_buf[MAX_MESSAGE_SIZE];
+uint8_t serial_buf[128];
 
 void loop() {
     if (!client || !client.connected()) {

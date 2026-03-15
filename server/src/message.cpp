@@ -16,7 +16,10 @@ ParseMessageResult readMessage(WiFiClient& client, MessageHeader& header, uint8_
     }
 
     static uint8_t header_buf[4];
-    read_all(client, header_buf, sizeof(header_buf));
+    int res = read_all(client, header_buf, sizeof(header_buf));
+    if (res < 0) {
+        return ParseMessageResult::ReadError;
+    }
     header = MessageHeader(header_buf);
 
     if (header.kind >= MessageKind_Count) {

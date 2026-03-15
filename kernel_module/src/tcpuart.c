@@ -174,7 +174,7 @@ static int __init tcpuart_init(void) {
         cdev_del(&state.ctl_cdev);
         device_destroy(state.ctl_class, dev_num);
         class_destroy(state.ctl_class);
-        unregister_chrdev_region(dev_num, MAX_DEVICES);
+        unregister_chrdev_region(dev_num, 1);
         return PTR_ERR(state.tty_driver);
     }
 
