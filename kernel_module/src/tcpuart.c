@@ -145,13 +145,37 @@ static int __init tcpuart_init(void) {
     state.ctl_fops.unlocked_ioctl = handle_ctl_ioctl;
 
     dev_t dev_num;
-    alloc_chrdev_region(&dev_num, 0, 1, "tcpuart");
+    int ret = alloc_chrdev_region(&dev_num, 0, 1, "tcpuart");
+    if (ret) {
+        return ret;
+    }
+
     state.ctl_class = class_create("tcpuart");
+    if (IS_ERR(state.ctl_class)) {
+        ret = PTR_ERR(state.ctl_class);
+        state.ctl_class = NULL;
+        unregister_chrdev_region(dev_num, 1);
+        return ret;
+    }
     state.ctl_class->devnode = tcpuart_devnode;
 
     cdev_init(&state.ctl_cdev, &state.ctl_fops);
-    cdev_add(&state.ctl_cdev, dev_num, 1);
-    device_create(state.ctl_class, NULL, dev_num, NULL, "tcpuart0");
+    ret = cdev_add(&state.ctl_cdev, dev_num, 1);
+    if (ret) {
+        class_destroy(state.ctl_class);
+        state.ctl_class = NULL;
+        unregister_chrdev_region(dev_num, 1);
+        return ret;
+    }
+
+    struct device* ctl_dev = device_create(state.ctl_class, NULL, dev_num, NULL, "tcpuart0");
+    if (IS_ERR(ctl_dev)) {
+        cdev_del(&state.ctl_cdev);
+        class_destroy(state.ctl_class);
+        state.ctl_class = NULL;
+        unregister_chrdev_region(dev_num, 1);
+        return PTR_ERR(ctl_dev);
+    }
 
     state.tty_driver = tty_alloc_driver(MAX_DEVICES, TTY_DRIVER_DYNAMIC_DEV | TTY_DRIVER_REAL_RAW);
     if (IS_ERR(state.tty_driver)) {
@@ -171,15 +195,37 @@ static int __init tcpuart_init(void) {
     state.tty_driver->init_termios = tty_std_termios;
     state.tty_driver->ops = conn_get_tty_ops();
 
-    tty_register_driver(state.tty_driver);
-
     for (int i = 0; i < MAX_CONNS; i++) {
         state.table.conns[i] = kzalloc(sizeof(struct connection), GFP_KERNEL);
+        if (!state.table.conns[i]) {
+            ret = -ENOMEM;
+            goto err_free_conns;
+        }
     }
 
     state.tty_driver->driver_state = &state.table;
 
+    ret = tty_register_driver(state.tty_driver);
+    if (ret) {
+        goto err_free_conns;
+    }
+
     return 0;
+
+err_free_conns:
+    for (int i = 0; i < MAX_CONNS; i++) {
+        kfree(state.table.conns[i]);
+        state.table.conns[i] = NULL;
+    }
+
+    tty_driver_kref_put(state.tty_driver);
+    state.tty_driver = NULL;
+    device_destroy(state.ctl_class, dev_num);
+    cdev_del(&state.ctl_cdev);
+    class_destroy(state.ctl_class);
+    state.ctl_class = NULL;
+    unregister_chrdev_region(dev_num, 1);
+    return ret;
 }
 
 static void __exit tcpuart_exit(void) {
@@ -190,14 +236,16 @@ static void __exit tcpuart_exit(void) {
         }
     }
 
-    tty_unregister_driver(state.tty_driver);
-    tty_driver_kref_put(state.tty_driver);
+    if (state.tty_driver) {
+        tty_unregister_driver(state.tty_driver);
+        tty_driver_kref_put(state.tty_driver);
+    }
 
     dev_t dev_num = state.ctl_cdev.dev;
     cdev_del(&state.ctl_cdev);
     device_destroy(state.ctl_class, dev_num);
     class_destroy(state.ctl_class);
-    unregister_chrdev_region(dev_num, MAX_DEVICES);
+    unregister_chrdev_region(dev_num, 1);
 }
 
 module_init(tcpuart_init);

@@ -83,6 +83,25 @@ static void conn_data_ready(struct sock* sk) {
     schedule_work(&conn->rx_work);
 }
 
+static void conn_quiesce(struct connection* conn) {
+    clear_bit(CONN_THROTTLED, &conn->flags);
+    cancel_work_sync(&conn->rx_work);
+
+    if (conn->sock) {
+        write_lock_bh(&conn->sock->sk->sk_callback_lock);
+        conn->sock->sk->sk_data_ready = conn->old_data_ready;
+        conn->sock->sk->sk_user_data = NULL;
+        write_unlock_bh(&conn->sock->sk->sk_callback_lock);
+
+        kernel_sock_shutdown(conn->sock, SHUT_RDWR);
+
+        sock_release(conn->sock);
+        conn->sock = NULL;
+    }
+
+    clear_bit(CONN_CONNECTED, &conn->flags);
+}
+
 static int conn_activate(struct tty_port* port, struct tty_struct* tty) {
     struct connection* conn = container_of(port, struct connection, port);
 
@@ -105,22 +124,7 @@ static int conn_activate(struct tty_port* port, struct tty_struct* tty) {
 
 static void conn_shutdown(struct tty_port* port) {
     struct connection* conn = container_of(port, struct connection, port);
-
-    if (!conn->sock) {
-        return;
-    }
-
-    write_lock_bh(&conn->sock->sk->sk_callback_lock);
-    conn->sock->sk->sk_data_ready = conn->old_data_ready;
-    conn->sock->sk->sk_user_data = NULL;
-    write_unlock_bh(&conn->sock->sk->sk_callback_lock);
-
-    cancel_work_sync(&conn->rx_work);
-    kernel_sock_shutdown(conn->sock, SHUT_RDWR);
-    sock_release(conn->sock);
-    conn->sock = NULL;
-
-    clear_bit(CONN_CONNECTED, &conn->flags);
+    conn_quiesce(conn);
 }
 
 static const struct tty_port_operations port_ops = {
@@ -166,10 +170,11 @@ void conn_destroy(struct connection* conn) {
         return;
     }
 
+    conn_quiesce(conn);
+
     tty_port_unregister_device(&conn->port, conn->driver, conn->minor);
     tty_port_destroy(&conn->port);
     clear_bit(CONN_ACTIVE, &conn->flags);
-    clear_bit(CONN_CONNECTED, &conn->flags);
 }
 
 int conn_get_info(struct connection* conn, struct tcpuart_server_info* info) {
