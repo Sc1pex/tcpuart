@@ -13,7 +13,7 @@ enum Commands {
     /// Create a new device and connect it
     Connect { addr: String, port: u16 },
 
-    /// Disconnect the device with the specified minor number
+    /// Try to disconnect the device with the specified minor number
     Disconnect { minor: u64 },
 
     /// Get the server ip and port for the device with the specified minor number
@@ -75,6 +75,11 @@ fn disconnect_device(minor: u64) -> std::io::Result<()> {
                 std::io::ErrorKind::NotFound,
                 "Device not found",
             ))
+        }
+
+        Err(ioctl::IoctlError::DeviceBusy) => {
+            println!("Cannot disconnect device /dev/tcpuart{minor} because it is busy");
+            Ok(())
         }
         Err(ioctl::IoctlError::Other(err)) => {
             eprintln!("Failed to disconnect device: {err}");

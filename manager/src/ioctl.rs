@@ -20,8 +20,8 @@ mod raw {
 
     const TCPUART_IOC_MAGIC: u8 = b'T';
     const TCPUART_CONNECT_TO: u8 = 0;
-    const TCPUART_DISCONNECT: u8 = 1;
-    const TCPUART_GET_SERVER_INFO: u8 = 2;
+    const TCPUART_GET_SERVER_INFO: u8 = 1;
+    const TCPUART_TRY_DISCONNECT: u8 = 2;
 
     ioctl_write_ptr!(
         tcpuart_connect_to,
@@ -30,19 +30,24 @@ mod raw {
         ConnectTo
     );
 
-    ioctl_write_int!(tcpuart_disconnect, TCPUART_IOC_MAGIC, TCPUART_DISCONNECT);
-
     ioctl_readwrite!(
         tcpuart_get_server_info,
         TCPUART_IOC_MAGIC,
         TCPUART_GET_SERVER_INFO,
         ServerInfo
     );
+
+    ioctl_write_int!(
+        tcpuart_try_disconnect,
+        TCPUART_IOC_MAGIC,
+        TCPUART_TRY_DISCONNECT
+    );
 }
 
 pub enum IoctlError {
     NoSlotsLeft,
     DeviceNotFound,
+    DeviceBusy,
     Other(Errno),
 }
 
@@ -52,14 +57,6 @@ pub fn connect_to(file: &std::fs::File, mut to: ConnectTo) -> Result<i32, IoctlE
     match unsafe { raw::tcpuart_connect_to(file.as_raw_fd(), &to) } {
         Ok(minor) => Ok(minor),
         Err(Errno::ENOSPC) => Err(IoctlError::NoSlotsLeft),
-        Err(err) => Err(IoctlError::Other(err)),
-    }
-}
-
-pub fn disconnect(file: &std::fs::File, minor: u64) -> Result<(), IoctlError> {
-    match unsafe { raw::tcpuart_disconnect(file.as_raw_fd(), minor) } {
-        Ok(_) => Ok(()),
-        Err(Errno::ENODEV) => Err(IoctlError::DeviceNotFound),
         Err(err) => Err(IoctlError::Other(err)),
     }
 }
@@ -77,6 +74,15 @@ pub fn get_server_info(file: &std::fs::File, minor: u32) -> Result<ServerInfo, I
             Ok(info)
         }
         Err(Errno::ENODEV) => Err(IoctlError::DeviceNotFound),
+        Err(err) => Err(IoctlError::Other(err)),
+    }
+}
+
+pub fn disconnect(file: &std::fs::File, minor: u64) -> Result<(), IoctlError> {
+    match unsafe { raw::tcpuart_try_disconnect(file.as_raw_fd(), minor) } {
+        Ok(_) => Ok(()),
+        Err(Errno::ENODEV) => Err(IoctlError::DeviceNotFound),
+        Err(Errno::EBUSY) => Err(IoctlError::DeviceBusy),
         Err(err) => Err(IoctlError::Other(err)),
     }
 }
