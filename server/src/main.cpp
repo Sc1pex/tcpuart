@@ -12,9 +12,6 @@ void setup() {
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
     }
-    Serial.println("Connected to WiFi");
-    Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());
 
     server.begin();
     server.setNoDelay(true);

@@ -23,14 +23,6 @@ struct MessageHeader {
         kind = ntohs(*(uint16_t*) buffer);
         size = ntohs(*(uint16_t*) (buffer + 2));
     }
-
-    void debugPrint() {
-        Serial.print("MessageHeader { kind: ");
-        Serial.print(kind);
-        Serial.print(", size: ");
-        Serial.print(size);
-        Serial.println(" }");
-    }
 };
 
 struct MessageConfigData {

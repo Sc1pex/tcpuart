@@ -70,7 +70,10 @@ static void conn_rx_work_handler(struct work_struct* work) {
         if (hdr.kind == MESSAGE_KIND_DATA) {
             size_t ret = tty_insert_flip_string(&conn->port, buf, hdr.size);
             if (ret != hdr.size) {
-                pr_err("Partial read. Lost %zu bytes of data", hdr.size - ret);
+                pr_warn_ratelimited(
+                    "dropping %zu RX bytes because the tty flip buffer is full\n",
+                    hdr.size - ret
+                );
             }
         }
     }
@@ -107,7 +110,6 @@ static int conn_activate(struct tty_port* port, struct tty_struct* tty) {
 
     int ret = create_tcp_socket(&conn->sock, conn->sock_addr, conn->sock_port);
     if (ret) {
-        pr_err("Failed to connect to server\n");
         return ret;
     }
 
@@ -286,7 +288,7 @@ static void conn_set_termios(struct tty_struct* tty, const struct ktermios* old)
         cfg.data_bits = 8;
         break;
     default:
-        pr_err("Invalid data bits\n");
+        pr_warn_ratelimited("ignoring unsupported tty data bits configuration\n");
         return;
     }
 

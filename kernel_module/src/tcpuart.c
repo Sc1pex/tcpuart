@@ -23,7 +23,6 @@ static int handle_connect_to_ioctl(const struct tcpuart_connect_to* conn_cmd) {
         }
     }
     if (conn_idx == MAX_CONNS) {
-        pr_err("no free connection slot\n");
         mutex_unlock(&state.table.mutex);
         return -ENOSPC;
     }
@@ -37,9 +36,6 @@ static int handle_connect_to_ioctl(const struct tcpuart_connect_to* conn_cmd) {
         return ret;
     }
 
-    pr_info(
-        "created /dev/tcpuart%d for %pI4:%d\n", conn_idx + 1, &conn_cmd->addr, ntohs(conn_cmd->port)
-    );
     return conn_idx + 1;
 }
 
@@ -94,7 +90,6 @@ static long handle_ctl_ioctl(struct file* file, unsigned int cmd, unsigned long 
     case TCPUART_CONNECT_TO: {
         struct tcpuart_connect_to conn_cmd;
         if (copy_from_user(&conn_cmd, (void __user*) arg, sizeof(conn_cmd))) {
-            pr_err("failed to copy data from user\n");
             return -EFAULT;
         }
 
@@ -104,7 +99,6 @@ static long handle_ctl_ioctl(struct file* file, unsigned int cmd, unsigned long 
     case TCPUART_GET_SERVER_INFO: {
         struct tcpuart_server_info server_info;
         if (copy_from_user(&server_info, (void __user*) arg, sizeof(server_info))) {
-            pr_err("failed to copy data from user\n");
             return -EFAULT;
         }
 
@@ -114,7 +108,6 @@ static long handle_ctl_ioctl(struct file* file, unsigned int cmd, unsigned long 
         }
 
         if (copy_to_user((void __user*) arg, &server_info, sizeof(server_info))) {
-            pr_err("failed to copy data to user\n");
             return -EFAULT;
         }
 
@@ -126,7 +119,6 @@ static long handle_ctl_ioctl(struct file* file, unsigned int cmd, unsigned long 
     }
 
     default:
-        pr_info("Invalid ioctl number\n");
         return -ENOTTY;
     }
 }
