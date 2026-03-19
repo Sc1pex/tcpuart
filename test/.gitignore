@@ -1,4 +1,0 @@
-*.o
-compile_commands.json
-.cache/
-main
