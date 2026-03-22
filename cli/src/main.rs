@@ -1,10 +1,10 @@
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::Ipv4Addr;
 use std::os::unix::net::UnixStream;
 
 use bytes::BytesMut;
 use clap::{Parser, Subcommand};
-use common::CtlMessage;
+use common::{CtlMessage, CtlResponse};
 
 #[derive(Parser)]
 struct Cli {
@@ -62,8 +62,51 @@ fn main() {
         eprintln!("Failed to encode message: {}", e);
         return;
     }
-
     if let Err(e) = conn.write_all(&buf) {
         eprintln!("Failed to write to socket: {}", e);
+        return;
+    }
+    buf.clear();
+
+    let mut temp_buf = [0u8; 1024];
+    loop {
+        let n = match conn.read(&mut temp_buf) {
+            Ok(0) => {
+                eprintln!("Daemon closed connection unexpectedly");
+                return;
+            }
+            Ok(n) => n,
+            Err(e) => {
+                eprintln!("Failed to read from socket: {}", e);
+                return;
+            }
+        };
+
+        buf.extend_from_slice(&temp_buf[..n]);
+
+        match CtlResponse::decode(&mut buf) {
+            Ok(Some(response)) => {
+                handle_response(response);
+                break;
+            }
+            Ok(None) => continue,
+            Err(e) => {
+                eprintln!("Failed to decode response: {}", e);
+                return;
+            }
+        }
+    }
+}
+
+fn handle_response(resp: CtlResponse) {
+    match resp {
+        CtlResponse::AddOk(pts_path) => {
+            println!("Successfully added connection. PTY device: {}", pts_path);
+        }
+        CtlResponse::Error(msg) => {
+            eprintln!("Error from daemon: {}", msg);
+        }
+        CtlResponse::RemoveOk => todo!(),
+        CtlResponse::List(_) => todo!(),
     }
 }
