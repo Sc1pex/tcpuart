@@ -1,29 +1,16 @@
-use common::CtlMessage;
+use common::{CtlMessage, CtlResponse};
+use futures::SinkExt;
 use state::State;
 use std::{fs, io};
 use tokio::{
     net::{UnixListener, UnixStream},
     signal,
-    sync::mpsc,
+    sync::{mpsc, oneshot},
 };
 use tokio_stream::StreamExt;
-use tokio_util::codec::{Decoder, FramedRead};
+use tokio_util::codec::{Decoder, Encoder, FramedRead, FramedWrite};
 
 mod state;
-
-struct CtlMessageDecoder;
-
-impl Decoder for CtlMessageDecoder {
-    type Item = CtlMessage;
-    type Error = io::Error;
-
-    fn decode(
-        &mut self,
-        src: &mut tokio_util::bytes::BytesMut,
-    ) -> Result<Option<Self::Item>, Self::Error> {
-        CtlMessage::decode(src)
-    }
-}
 
 #[allow(unexpected_cfgs)]
 #[tokio::main(flavor = "local")]
@@ -48,10 +35,9 @@ async fn main() {
                     Err(e) => eprintln!("Accept error: {}", e),
                 }
             }
-            Some(msg) = msg_rx.recv() => {
-                if let Err(e) = state.handle_msg(msg) {
-                    eprintln!("Error handling message: {e}");
-                }
+            Some((msg, send)) = msg_rx.recv() => {
+                let resp = state.handle_msg(msg);
+                let _ = send.send(resp);
             }
             _ = signal::ctrl_c() => {
                 break;
@@ -63,13 +49,57 @@ async fn main() {
     let _ = fs::remove_file(&socket_path);
 }
 
-async fn handle_stream(stream: UnixStream, msg_tx: mpsc::Sender<CtlMessage>) {
-    let mut reader = FramedRead::new(stream, CtlMessageDecoder);
+struct CtlMessageDecoder;
+struct CtlResponseEncoder;
+
+impl Decoder for CtlMessageDecoder {
+    type Item = CtlMessage;
+    type Error = io::Error;
+
+    fn decode(
+        &mut self,
+        src: &mut tokio_util::bytes::BytesMut,
+    ) -> Result<Option<Self::Item>, Self::Error> {
+        CtlMessage::decode(src)
+    }
+}
+
+impl Encoder<CtlResponse> for CtlResponseEncoder {
+    type Error = io::Error;
+
+    fn encode(
+        &mut self,
+        item: CtlResponse,
+        dst: &mut tokio_util::bytes::BytesMut,
+    ) -> Result<(), Self::Error> {
+        item.encode(dst)
+    }
+}
+
+async fn handle_stream(
+    mut stream: UnixStream,
+    msg_tx: mpsc::Sender<(CtlMessage, oneshot::Sender<CtlResponse>)>,
+) {
+    let (reader, writer) = stream.split();
+    let mut reader = FramedRead::new(reader, CtlMessageDecoder);
+    let mut writer = FramedWrite::new(writer, CtlResponseEncoder);
 
     while let Some(msg) = reader.next().await {
         match msg {
             Ok(msg) => {
-                let _ = msg_tx.send(msg).await;
+                let (tx, rx) = oneshot::channel();
+                if msg_tx.send((msg, tx)).await.is_err() {
+                    // Main tasked closed
+                    return;
+                }
+                let resp = match rx.await {
+                    Ok(resp) => resp,
+                    Err(_) => CtlResponse::Error("Something went wrong".to_string()),
+                };
+                writer
+                    .send(resp)
+                    .await
+                    .expect("Failed to send message to user");
             }
             Err(e) => eprintln!("Received invalid message: {}", e),
         }
