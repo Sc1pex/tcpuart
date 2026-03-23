@@ -1,6 +1,11 @@
+use crate::async_pty::AsyncPty;
 use common::{CtlMessage, CtlResponse};
-use nix::{fcntl::OFlag, pty};
-use tokio::net::TcpStream;
+use nix::{
+    fcntl::{self, OFlag},
+    pty,
+};
+use std::os::fd::OwnedFd;
+use tokio::{io::AsyncReadExt, net::TcpStream};
 
 #[allow(unused)]
 pub struct Connection {
@@ -9,7 +14,8 @@ pub struct Connection {
     port: u16,
 
     socket: Option<TcpStream>,
-    pty_master: pty::PtyMaster,
+    // Keep a slave connection alive to prevent EIO errors
+    keep_alive: OwnedFd,
 }
 
 #[derive(Default)]
@@ -21,7 +27,7 @@ impl State {
     pub fn handle_msg(&mut self, msg: CtlMessage) -> CtlResponse {
         match msg {
             CtlMessage::Add { name, addr, port } => {
-                let master = match pty::posix_openpt(OFlag::O_RDWR) {
+                let master = match pty::posix_openpt(OFlag::O_RDWR | OFlag::O_NOCTTY) {
                     Ok(master) => master,
                     Err(e) => return CtlResponse::Error(format!("Failed to create pty: {}", e)),
                 };
@@ -37,17 +43,54 @@ impl State {
                     Err(e) => return CtlResponse::Error(format!("Failed to get pts name: {}", e)),
                 };
 
+                let master = match AsyncPty::new(master) {
+                    Ok(master) => master,
+                    Err(_) => {
+                        eprintln!("Failed to create async pty");
+                        return CtlResponse::Error("Something went wrong".into());
+                    }
+                };
+
+                let keep_alive = match fcntl::open(
+                    slave_name.as_str(),
+                    OFlag::O_RDWR | OFlag::O_NOCTTY,
+                    nix::sys::stat::Mode::empty(),
+                ) {
+                    Ok(fd) => fd,
+                    Err(e) => {
+                        eprintln!("Failed to create owned fd: {e}");
+                        return CtlResponse::Error("Something went wrong".into());
+                    }
+                };
+
+                tokio::task::spawn_local(conn_task(master));
                 self.conns.push(Connection {
                     name,
                     addr,
                     port,
                     socket: None,
-                    pty_master: master,
+                    keep_alive,
                 });
                 CtlResponse::AddOk(slave_name)
             }
             CtlMessage::Remove { name: _name } => todo!(),
             CtlMessage::List => todo!(),
         }
+    }
+}
+
+async fn conn_task(mut master: AsyncPty) {
+    let mut buf = [0; 128];
+    loop {
+        let n = match master.read(&mut buf).await {
+            Ok(n) => n,
+            Err(e) => {
+                eprintln!("Failed to read from pty: {e} {}", e.kind());
+                continue;
+            }
+        };
+
+        let data = String::from_utf8_lossy(&buf[..n]);
+        println!("Received from pty: {data}");
     }
 }

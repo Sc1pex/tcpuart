@@ -10,6 +10,7 @@ use tokio::{
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Decoder, Encoder, FramedRead, FramedWrite};
 
+mod async_pty;
 mod state;
 
 #[allow(unexpected_cfgs)]
