@@ -1,7 +1,7 @@
 use crate::async_pty::{AsyncPty, PtyReadResult};
 use common::{CtlMessage, CtlResponse};
 use nix::{fcntl::OFlag, pty};
-use tokio::net::TcpStream;
+use tokio::{net::TcpStream, select, sync::oneshot};
 
 #[allow(unused)]
 pub struct Connection {
@@ -10,6 +10,7 @@ pub struct Connection {
     port: u16,
 
     socket: Option<TcpStream>,
+    shutdown_tx: oneshot::Sender<()>,
 }
 
 #[derive(Default)]
@@ -45,43 +46,63 @@ impl State {
                     }
                 };
 
-                tokio::spawn(conn_task(master));
+                let (shutdown_tx, shutdown_rx) = oneshot::channel();
+
+                tokio::spawn(conn_task(master, shutdown_rx));
                 self.conns.push(Connection {
                     name,
                     addr,
                     port,
                     socket: None,
+                    shutdown_tx,
                 });
                 CtlResponse::AddOk(slave_name)
             }
-            CtlMessage::Remove { name: _name } => todo!(),
+            CtlMessage::Remove { name } => {
+                if let Some(pos) = self.conns.iter().position(|c| c.name == name) {
+                    let conn = self.conns.swap_remove(pos);
+                    // If send errors, it means the task has already shut down, so we can ignore it
+                    let _ = conn.shutdown_tx.send(());
+                    CtlResponse::RemoveOk
+                } else {
+                    CtlResponse::Error(format!("No connection found with name: {name}"))
+                }
+            }
             CtlMessage::List => todo!(),
         }
     }
 }
 
-async fn conn_task(mut master: AsyncPty) {
+async fn conn_task(mut master: AsyncPty, mut shutdown_rx: oneshot::Receiver<()>) {
     let mut buf = [0; 128];
     loop {
-        match master.read(&mut buf).await {
-            Ok(PtyReadResult::TermiosChange(c)) => {
-                println!("Termios settings changed: ");
-                println!("   Baud: {}", c.baudrate);
-                println!("   Data bits: {}", c.data_bits);
-                println!("   Parity: {}", c.parity);
-                println!("   Stop bits: {}", c.stop_bits);
+        select! {
+            _ = &mut shutdown_rx => {
+                println!("Shutting down connection task");
+                break;
             }
-            Ok(PtyReadResult::Data(n)) => {
-                let data = String::from_utf8_lossy(&buf[..n]);
-                println!("Received from pty: {data}");
+            res = master.read(&mut buf) => {
+                match res {
+                    Ok(PtyReadResult::TermiosChange(c)) => {
+                        println!("Termios settings changed: ");
+                        println!("   Baud: {}", c.baudrate);
+                        println!("   Data bits: {}", c.data_bits);
+                        println!("   Parity: {}", c.parity);
+                        println!("   Stop bits: {}", c.stop_bits);
+                    }
+                    Ok(PtyReadResult::Data(n)) => {
+                        let data = String::from_utf8_lossy(&buf[..n]);
+                        println!("Received from pty: {data}");
+                    }
+                    Ok(PtyReadResult::ControlMessage(c)) => {
+                        println!("Received other ctrl message: {}", c);
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to read from pty: {e} {}", e.kind());
+                        continue;
+                    }
+                }
             }
-            Ok(PtyReadResult::ControlMessage(c)) => {
-                println!("Received other ctrl message: {}", c);
-            }
-            Err(e) => {
-                eprintln!("Failed to read from pty: {e} {}", e.kind());
-                continue;
-            }
-        };
+        }
     }
 }

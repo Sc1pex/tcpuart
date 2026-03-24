@@ -106,7 +106,9 @@ fn handle_response(resp: CtlResponse) {
         CtlResponse::Error(msg) => {
             eprintln!("Error from daemon: {}", msg);
         }
-        CtlResponse::RemoveOk => todo!(),
+        CtlResponse::RemoveOk => {
+            println!("Successfully removed connection");
+        }
         CtlResponse::List(_) => todo!(),
     }
 }
