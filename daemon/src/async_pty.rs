@@ -36,6 +36,9 @@ const TIOCPKT_IOCTL: u8 = 0x40;
 
 nix::ioctl_write_ptr_bad!(tiocpkt, nix::libc::TIOCPKT, i32);
 
+#[cfg(target_os = "macos")]
+nix::ioctl_write_ptr_bad!(tiocextproc, nix::libc::TIOCEXTPROC, i32);
+
 impl AsyncPty {
     pub fn new(pty: PtyMaster) -> io::Result<Self> {
         let flags = nix::fcntl::fcntl(&pty, nix::fcntl::FcntlArg::F_GETFL)?;
@@ -59,9 +62,9 @@ impl AsyncPty {
         )?;
 
         // Required to get IOCTL packets
-        let mut tio = termios::tcgetattr(&slave_fd)?;
-        tio.local_flags |= termios::LocalFlags::EXTPROC;
-        termios::tcsetattr(&slave_fd, termios::SetArg::TCSANOW, &tio)?;
+        set_extproc(&pty, &slave_fd)?;
+
+        let tio = termios::tcgetattr(&slave_fd)?;
 
         Ok(Self {
             inner: AsyncFd::new(pty)?,
@@ -94,13 +97,11 @@ impl AsyncPty {
                         if ctrl[0] & TIOCPKT_IOCTL != 0 {
                             let mut new_tio = termios::tcgetattr(&self.slave_fd)?;
                             if new_tio != self.current_tio {
+                                // Re-assert EXTPROC if it was cleared by the slave app
                                 if !new_tio.local_flags.contains(termios::LocalFlags::EXTPROC) {
-                                    new_tio.local_flags |= termios::LocalFlags::EXTPROC;
-                                    termios::tcsetattr(
-                                        &self.slave_fd,
-                                        termios::SetArg::TCSANOW,
-                                        &new_tio,
-                                    )?;
+                                    set_extproc(self.inner.get_ref(), &self.slave_fd)?;
+                                    // Refresh after setting
+                                    new_tio = termios::tcgetattr(&self.slave_fd)?;
                                 }
 
                                 self.current_tio = new_tio;
@@ -122,6 +123,26 @@ impl AsyncPty {
             }
         }
     }
+}
+
+#[allow(unused_variables)]
+fn set_extproc(master: &PtyMaster, slave: &OwnedFd) -> io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut tio = termios::tcgetattr(slave)?;
+        tio.local_flags |= termios::LocalFlags::EXTPROC;
+        termios::tcsetattr(slave, termios::SetArg::TCSANOW, &tio)?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let on: i32 = 1;
+        unsafe {
+            tiocextproc(master.as_raw_fd(), &on)?;
+        }
+    }
+
+    Ok(())
 }
 
 impl AsyncWrite for AsyncPty {
