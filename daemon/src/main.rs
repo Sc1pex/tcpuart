@@ -13,8 +13,7 @@ use tokio_util::codec::{Decoder, Encoder, FramedRead, FramedWrite};
 mod async_pty;
 mod state;
 
-#[allow(unexpected_cfgs)]
-#[tokio::main(flavor = "local")]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     let socket_path = std::env::args()
         .nth(1)
@@ -31,7 +30,7 @@ async fn main() {
                 match res {
                     Ok((stream, _)) => {
                         let msg_tx = msg_tx.clone();
-                        tokio::task::spawn_local(async move { handle_stream(stream, msg_tx).await });
+                        tokio::spawn(async move { handle_stream(stream, msg_tx).await });
                     }
                     Err(e) => eprintln!("Accept error: {}", e),
                 }

@@ -1,11 +1,11 @@
-use crate::async_pty::AsyncPty;
+use crate::async_pty::{AsyncPty, PtyReadResult};
 use common::{CtlMessage, CtlResponse};
 use nix::{
     fcntl::{self, OFlag},
     pty,
 };
 use std::os::fd::OwnedFd;
-use tokio::{io::AsyncReadExt, net::TcpStream};
+use tokio::net::TcpStream;
 
 #[allow(unused)]
 pub struct Connection {
@@ -63,7 +63,7 @@ impl State {
                     }
                 };
 
-                tokio::task::spawn_local(conn_task(master));
+                tokio::spawn(conn_task(master));
                 self.conns.push(Connection {
                     name,
                     addr,
@@ -82,15 +82,21 @@ impl State {
 async fn conn_task(mut master: AsyncPty) {
     let mut buf = [0; 128];
     loop {
-        let n = match master.read(&mut buf).await {
-            Ok(n) => n,
+        match master.read(&mut buf).await {
+            Ok(PtyReadResult::TermiosChange) => {
+                println!("Termios settings changed");
+            }
+            Ok(PtyReadResult::Data(n)) => {
+                let data = String::from_utf8_lossy(&buf[..n]);
+                println!("Received from pty: {data}");
+            }
+            Ok(PtyReadResult::ControlMessage(c)) => {
+                println!("Received other ctrl message: {}", c);
+            }
             Err(e) => {
                 eprintln!("Failed to read from pty: {e} {}", e.kind());
                 continue;
             }
         };
-
-        let data = String::from_utf8_lossy(&buf[..n]);
-        println!("Received from pty: {data}");
     }
 }
