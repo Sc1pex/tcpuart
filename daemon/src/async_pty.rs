@@ -37,7 +37,10 @@ const TIOCPKT_IOCTL: u8 = 0x40;
 nix::ioctl_write_ptr_bad!(tiocpkt, nix::libc::TIOCPKT, i32);
 
 #[cfg(target_os = "macos")]
-nix::ioctl_write_ptr_bad!(tiocextproc, nix::libc::TIOCEXTPROC, i32);
+const TIOCEXTPROC: u64 = 0x80047471;
+
+#[cfg(target_os = "macos")]
+nix::ioctl_write_ptr_bad!(tiocextproc, TIOCEXTPROC, i32);
 
 impl AsyncPty {
     pub fn new(pty: PtyMaster) -> io::Result<Self> {
