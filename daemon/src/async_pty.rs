@@ -15,9 +15,16 @@ pub struct AsyncPty {
     current_tio: termios::Termios,
 }
 
+pub struct TermiosChange {
+    pub baudrate: u32,
+    pub data_bits: u8,
+    pub parity: u8,
+    pub stop_bits: u8,
+}
+
 pub enum PtyReadResult {
     Data(usize),
-    TermiosChange,
+    TermiosChange(TermiosChange),
     ControlMessage(u8),
 }
 
@@ -86,7 +93,9 @@ impl AsyncPty {
                                     self.current_tio = new_tio;
                                 }
 
-                                return Ok(PtyReadResult::TermiosChange);
+                                return Ok(PtyReadResult::TermiosChange(get_termios_change(
+                                    &self.current_tio,
+                                )));
                             }
                         } else {
                             return Ok(PtyReadResult::ControlMessage(ctrl[0]));
@@ -126,5 +135,39 @@ impl AsyncWrite for AsyncPty {
 
     fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Poll::Ready(Ok(()))
+    }
+}
+
+fn get_termios_change(tio: &termios::Termios) -> TermiosChange {
+    let baudrate = termios::cfgetispeed(tio);
+    let data_bits = match tio.control_flags & termios::ControlFlags::CSIZE {
+        termios::ControlFlags::CS5 => 5,
+        termios::ControlFlags::CS6 => 6,
+        termios::ControlFlags::CS7 => 7,
+        termios::ControlFlags::CS8 => 8,
+        _ => 0,
+    };
+    let parity = if tio.control_flags.contains(termios::ControlFlags::PARENB)
+        && !tio.control_flags.contains(termios::ControlFlags::PARODD)
+    {
+        1
+    } else if tio.control_flags.contains(termios::ControlFlags::PARENB)
+        && tio.control_flags.contains(termios::ControlFlags::PARODD)
+    {
+        2
+    } else {
+        0
+    };
+    let stop_bits = if tio.control_flags.contains(termios::ControlFlags::CSTOPB) {
+        2
+    } else {
+        1
+    };
+
+    TermiosChange {
+        baudrate: baudrate as u32,
+        data_bits,
+        parity,
+        stop_bits,
     }
 }

@@ -83,8 +83,12 @@ async fn conn_task(mut master: AsyncPty) {
     let mut buf = [0; 128];
     loop {
         match master.read(&mut buf).await {
-            Ok(PtyReadResult::TermiosChange) => {
-                println!("Termios settings changed");
+            Ok(PtyReadResult::TermiosChange(c)) => {
+                println!("Termios settings changed: ");
+                println!("   Baud: {}", c.baudrate);
+                println!("   Data bits: {}", c.data_bits);
+                println!("   Parity: {}", c.parity);
+                println!("   Stop bits: {}", c.stop_bits);
             }
             Ok(PtyReadResult::Data(n)) => {
                 let data = String::from_utf8_lossy(&buf[..n]);
