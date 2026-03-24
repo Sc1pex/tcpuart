@@ -1,10 +1,11 @@
 use nix::{
+    fcntl,
     pty::PtyMaster,
     sys::{termios, uio::readv},
 };
 use std::{
     io::{self, IoSliceMut, Write},
-    os::fd::AsRawFd,
+    os::fd::{AsRawFd, OwnedFd},
     pin::Pin,
     task::{ready, Context, Poll},
 };
@@ -13,6 +14,8 @@ use tokio::io::{unix::AsyncFd, AsyncWrite};
 pub struct AsyncPty {
     inner: AsyncFd<PtyMaster>,
     current_tio: termios::Termios,
+
+    slave_fd: OwnedFd,
 }
 
 pub struct TermiosChange {
@@ -48,14 +51,22 @@ impl AsyncPty {
             tiocpkt(pty.as_raw_fd(), &1i32)?;
         }
 
+        let slave_name = unsafe { nix::pty::ptsname(&pty)? };
+        let slave_fd = fcntl::open(
+            slave_name.as_str(),
+            fcntl::OFlag::O_RDWR | fcntl::OFlag::O_NOCTTY,
+            nix::sys::stat::Mode::empty(),
+        )?;
+
         // Required to get IOCTL packets
-        let mut tio = termios::tcgetattr(&pty)?;
+        let mut tio = termios::tcgetattr(&slave_fd)?;
         tio.local_flags |= termios::LocalFlags::EXTPROC;
         termios::tcsetattr(&pty, termios::SetArg::TCSANOW, &tio)?;
 
         Ok(Self {
             inner: AsyncFd::new(pty)?,
             current_tio: tio,
+            slave_fd,
         })
     }
 
@@ -81,12 +92,12 @@ impl AsyncPty {
                         }
                     } else {
                         if ctrl[0] & TIOCPKT_IOCTL != 0 {
-                            let mut new_tio = termios::tcgetattr(&guard.get_inner())?;
+                            let mut new_tio = termios::tcgetattr(&self.slave_fd)?;
                             if new_tio != self.current_tio {
                                 if !new_tio.local_flags.contains(termios::LocalFlags::EXTPROC) {
                                     new_tio.local_flags |= termios::LocalFlags::EXTPROC;
                                     termios::tcsetattr(
-                                        &guard.get_inner(),
+                                        &self.slave_fd,
                                         termios::SetArg::TCSANOW,
                                         &new_tio,
                                     )?;

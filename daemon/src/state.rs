@@ -1,10 +1,6 @@
 use crate::async_pty::{AsyncPty, PtyReadResult};
 use common::{CtlMessage, CtlResponse};
-use nix::{
-    fcntl::{self, OFlag},
-    pty,
-};
-use std::os::fd::OwnedFd;
+use nix::{fcntl::OFlag, pty};
 use tokio::net::TcpStream;
 
 #[allow(unused)]
@@ -14,8 +10,6 @@ pub struct Connection {
     port: u16,
 
     socket: Option<TcpStream>,
-    // Keep a slave connection alive to prevent EIO errors
-    keep_alive: OwnedFd,
 }
 
 #[derive(Default)]
@@ -51,25 +45,12 @@ impl State {
                     }
                 };
 
-                let keep_alive = match fcntl::open(
-                    slave_name.as_str(),
-                    OFlag::O_RDWR | OFlag::O_NOCTTY,
-                    nix::sys::stat::Mode::empty(),
-                ) {
-                    Ok(fd) => fd,
-                    Err(e) => {
-                        eprintln!("Failed to create owned fd: {e}");
-                        return CtlResponse::Error("Something went wrong".into());
-                    }
-                };
-
                 tokio::spawn(conn_task(master));
                 self.conns.push(Connection {
                     name,
                     addr,
                     port,
                     socket: None,
-                    keep_alive,
                 });
                 CtlResponse::AddOk(slave_name)
             }
