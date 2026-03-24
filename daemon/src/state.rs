@@ -23,6 +23,14 @@ impl State {
     pub fn handle_msg(&mut self, msg: CtlMessage) -> CtlResponse {
         match msg {
             CtlMessage::Add { name, addr, port } => {
+                // Check if name is already used
+                if self.conns.iter().any(|c| c.name == name) {
+                    return CtlResponse::Error(format!(
+                        "Connection with name '{}' already exists",
+                        name
+                    ));
+                };
+
                 let master = match pty::posix_openpt(OFlag::O_RDWR | OFlag::O_NOCTTY) {
                     Ok(master) => master,
                     Err(e) => return CtlResponse::Error(format!("Failed to create pty: {}", e)),
