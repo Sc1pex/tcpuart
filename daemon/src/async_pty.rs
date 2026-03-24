@@ -61,7 +61,7 @@ impl AsyncPty {
         // Required to get IOCTL packets
         let mut tio = termios::tcgetattr(&slave_fd)?;
         tio.local_flags |= termios::LocalFlags::EXTPROC;
-        termios::tcsetattr(&pty, termios::SetArg::TCSANOW, &tio)?;
+        termios::tcsetattr(&slave_fd, termios::SetArg::TCSANOW, &tio)?;
 
         Ok(Self {
             inner: AsyncFd::new(pty)?,
