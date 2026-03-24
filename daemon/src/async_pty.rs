@@ -90,9 +90,9 @@ impl AsyncPty {
                                         termios::SetArg::TCSANOW,
                                         &new_tio,
                                     )?;
-                                    self.current_tio = new_tio;
                                 }
 
+                                self.current_tio = new_tio;
                                 return Ok(PtyReadResult::TermiosChange(get_termios_change(
                                     &self.current_tio,
                                 )));
