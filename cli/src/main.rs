@@ -109,6 +109,19 @@ fn handle_response(resp: CtlResponse) {
         CtlResponse::RemoveOk => {
             println!("Successfully removed connection");
         }
-        CtlResponse::List(_) => todo!(),
+        CtlResponse::List(l) => {
+            if l.is_empty() {
+                println!("No active connections");
+            } else {
+                println!("Active connections:");
+                for info in l {
+                    let ip = Ipv4Addr::from(info.addr);
+                    println!(
+                        "- {}: {}:{} (PTY: {})",
+                        info.name, ip, info.port, info.pts_path
+                    );
+                }
+            }
+        }
     }
 }

@@ -1,5 +1,5 @@
 use crate::async_pty::{AsyncPty, PtyReadResult};
-use common::{CtlMessage, CtlResponse};
+use common::{ConnectionInfo, CtlMessage, CtlResponse};
 use nix::{fcntl::OFlag, pty};
 use tokio::{net::TcpStream, select, sync::oneshot};
 
@@ -8,6 +8,7 @@ pub struct Connection {
     name: String,
     addr: u32,
     port: u16,
+    slave_path: String,
 
     socket: Option<TcpStream>,
     shutdown_tx: oneshot::Sender<()>,
@@ -55,6 +56,7 @@ impl State {
                     port,
                     socket: None,
                     shutdown_tx,
+                    slave_path: slave_name.clone(),
                 });
                 CtlResponse::AddOk(slave_name)
             }
@@ -68,7 +70,19 @@ impl State {
                     CtlResponse::Error(format!("No connection found with name: {name}"))
                 }
             }
-            CtlMessage::List => todo!(),
+            CtlMessage::List => {
+                let list = self
+                    .conns
+                    .iter()
+                    .map(|c| ConnectionInfo {
+                        name: c.name.clone(),
+                        addr: c.addr,
+                        port: c.port,
+                        pts_path: c.slave_path.clone(),
+                    })
+                    .collect();
+                CtlResponse::List(list)
+            }
         }
     }
 }
