@@ -45,8 +45,8 @@ impl State {
 
                 let master = match AsyncPty::new(master) {
                     Ok(master) => master,
-                    Err(_) => {
-                        eprintln!("Failed to create async pty");
+                    Err(e) => {
+                        eprintln!("Failed to create async pty: {e}");
                         return CtlResponse::Error("Something went wrong".into());
                     }
                 };
