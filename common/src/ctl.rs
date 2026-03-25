@@ -1,8 +1,6 @@
 use bytes::{Buf, BufMut, BytesMut};
 use std::io;
 
-mod codec;
-
 #[derive(Debug)]
 pub enum CtlMessage {
     Add { name: String, addr: u32, port: u16 },
@@ -38,12 +36,12 @@ impl CtlMessage {
 
         match self {
             CtlMessage::Add { name, addr, port } => {
-                codec::encode_str(name, dst)?;
+                encode_str(name, dst)?;
                 dst.put_u32(*addr);
                 dst.put_u16(*port);
             }
             CtlMessage::Remove { name } => {
-                codec::encode_str(name, dst)?;
+                encode_str(name, dst)?;
             }
             CtlMessage::List => {}
         }
@@ -60,7 +58,7 @@ impl CtlMessage {
 
         let msg = match message_kind {
             1 => {
-                let name = match codec::decode_str(&mut cursor)? {
+                let name = match decode_str(&mut cursor)? {
                     Some(name) => name,
                     None => return Ok(None),
                 };
@@ -75,7 +73,7 @@ impl CtlMessage {
                 CtlMessage::Add { name, addr, port }
             }
             2 => {
-                let name = match codec::decode_str(&mut cursor)? {
+                let name = match decode_str(&mut cursor)? {
                     Some(name) => name,
                     None => return Ok(None),
                 };
@@ -111,20 +109,20 @@ impl CtlResponse {
         dst.put_u8(self.msg_type());
         match self {
             CtlResponse::AddOk(pts_path) => {
-                codec::encode_str(pts_path, dst)?;
+                encode_str(pts_path, dst)?;
             }
             CtlResponse::RemoveOk => {}
             CtlResponse::List(connections) => {
                 dst.put_u16(connections.len() as u16);
                 for conn in connections {
-                    codec::encode_str(&conn.name, dst)?;
+                    encode_str(&conn.name, dst)?;
                     dst.put_u32(conn.addr);
                     dst.put_u16(conn.port);
-                    codec::encode_str(&conn.pts_path, dst)?;
+                    encode_str(&conn.pts_path, dst)?;
                 }
             }
             CtlResponse::Error(msg) => {
-                codec::encode_str(msg, dst)?;
+                encode_str(msg, dst)?;
             }
         }
         Ok(())
@@ -140,7 +138,7 @@ impl CtlResponse {
 
         let response = match message_kind {
             1 => {
-                let pts_path = match codec::decode_str(&mut cursor)? {
+                let pts_path = match decode_str(&mut cursor)? {
                     Some(path) => path,
                     None => return Ok(None),
                 };
@@ -154,7 +152,7 @@ impl CtlResponse {
                 };
                 let mut connections = Vec::with_capacity(count as usize);
                 for _ in 0..count {
-                    let name = match codec::decode_str(&mut cursor)? {
+                    let name = match decode_str(&mut cursor)? {
                         Some(name) => name,
                         None => return Ok(None),
                     };
@@ -166,7 +164,7 @@ impl CtlResponse {
                         Ok(port) => port,
                         Err(_) => return Ok(None),
                     };
-                    let pts_path = match codec::decode_str(&mut cursor)? {
+                    let pts_path = match decode_str(&mut cursor)? {
                         Some(path) => path,
                         None => return Ok(None),
                     };
@@ -180,7 +178,7 @@ impl CtlResponse {
                 CtlResponse::List(connections)
             }
             255 => {
-                let msg = match codec::decode_str(&mut cursor)? {
+                let msg = match decode_str(&mut cursor)? {
                     Some(msg) => msg,
                     None => return Ok(None),
                 };
@@ -199,4 +197,33 @@ impl CtlResponse {
         src.advance(bytes_read);
         Ok(Some(response))
     }
+}
+
+fn encode_str(s: &str, dst: &mut BytesMut) -> io::Result<()> {
+    let size = s.as_bytes().len();
+    if size > 255 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "string too long",
+        ));
+    }
+    dst.put_u8(size as u8);
+    dst.put_slice(s.as_bytes());
+    Ok(())
+}
+
+fn decode_str(cursor: &mut io::Cursor<&mut BytesMut>) -> io::Result<Option<String>> {
+    let size = match cursor.try_get_u8() {
+        Ok(size) => size as usize,
+        Err(_) => return Ok(None),
+    };
+
+    let mut buf = vec![0; size];
+    if cursor.try_copy_to_slice(&mut buf).is_err() {
+        return Ok(None);
+    }
+
+    Ok(Some(String::from_utf8(buf).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidData, "invalid string")
+    })?))
 }
