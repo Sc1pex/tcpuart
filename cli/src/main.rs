@@ -1,10 +1,9 @@
+use bytes::BytesMut;
+use clap::{Parser, Subcommand};
+use common::ctl::{CtlMessage, CtlResponse};
 use std::io::{Read, Write};
 use std::net::Ipv4Addr;
 use std::os::unix::net::UnixStream;
-
-use bytes::BytesMut;
-use clap::{Parser, Subcommand};
-use common::{CtlMessage, CtlResponse};
 
 #[derive(Parser)]
 struct Cli {

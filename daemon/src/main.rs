@@ -1,4 +1,4 @@
-use common::{CtlMessage, CtlResponse};
+use common::ctl::{CtlMessage, CtlResponse};
 use futures::SinkExt;
 use state::State;
 use std::{fs, io};

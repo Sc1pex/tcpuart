@@ -1,5 +1,5 @@
 use crate::async_pty::{AsyncPty, PtyReadResult};
-use common::{ConnectionInfo, CtlMessage, CtlResponse};
+use common::ctl::{ConnectionInfo, CtlMessage, CtlResponse};
 use nix::{fcntl::OFlag, pty};
 use tokio::{net::TcpStream, select, sync::oneshot};
 
