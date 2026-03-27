@@ -1,13 +1,14 @@
 use crate::async_pty::{AsyncPty, PtyReadResult};
 use common::{
     ctl::{ConnectionInfo, CtlMessage, CtlResponse},
-    msg::{MessageEncoder, MAX_MESSAGE_LEN},
+    msg::{Message, MessageDecoder, MessageEncoder, MAX_MESSAGE_LEN},
 };
 use futures::SinkExt;
 use nix::{fcntl::OFlag, pty};
 use std::net::Ipv4Addr;
-use tokio::{net::TcpStream, select, sync::oneshot};
-use tokio_util::codec::FramedWrite;
+use tokio::{io::AsyncWriteExt, net::TcpStream, select, sync::oneshot};
+use tokio_stream::StreamExt;
+use tokio_util::codec::{FramedRead, FramedWrite};
 
 #[allow(unused)]
 pub struct Connection {
@@ -114,9 +115,10 @@ async fn conn_task(
     mut sock: TcpStream,
     mut shutdown_rx: oneshot::Receiver<()>,
 ) {
-    let (_reader, writer) = sock.split();
+    let (reader, writer) = sock.split();
     let mut pty_buf = [0; MAX_MESSAGE_LEN as usize];
     let mut writer = FramedWrite::new(writer, MessageEncoder);
+    let mut reader = FramedRead::new(reader, MessageDecoder);
     loop {
         select! {
             _ = &mut shutdown_rx => {
@@ -148,6 +150,18 @@ async fn conn_task(
                     Err(e) => {
                         eprintln!("Failed to read from pty: {e} {}", e.kind());
                         continue;
+                    }
+                }
+            }
+            Some(msg) = reader.next() => {
+                match msg {
+                    Ok(msg) => {
+                        if let Message::Data(size, data) = msg {
+                            let _ = master.write_all(&data[..size as usize]).await;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Received invalid message from server: {e}");
                     }
                 }
             }
