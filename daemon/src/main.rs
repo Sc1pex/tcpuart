@@ -36,7 +36,7 @@ async fn main() {
                 }
             }
             Some((msg, send)) = msg_rx.recv() => {
-                let resp = state.handle_msg(msg);
+                let resp = state.handle_msg(msg).await;
                 let _ = send.send(resp);
             }
             _ = signal::ctrl_c() => {

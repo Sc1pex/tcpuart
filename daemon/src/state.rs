@@ -1,7 +1,12 @@
 use crate::async_pty::{AsyncPty, PtyReadResult};
-use common::ctl::{ConnectionInfo, CtlMessage, CtlResponse};
+use common::{
+    ctl::{ConnectionInfo, CtlMessage, CtlResponse},
+    msg::{encode_message, MessageHeader, MAX_MESSAGE_LEN},
+};
 use nix::{fcntl::OFlag, pty};
-use tokio::{net::TcpStream, select, sync::oneshot};
+use std::net::Ipv4Addr;
+use tokio::{io::AsyncWriteExt, net::TcpStream, select, sync::oneshot};
+use tokio_util::bytes::BytesMut;
 
 #[allow(unused)]
 pub struct Connection {
@@ -10,7 +15,6 @@ pub struct Connection {
     port: u16,
     slave_path: String,
 
-    socket: Option<TcpStream>,
     shutdown_tx: oneshot::Sender<()>,
 }
 
@@ -20,7 +24,7 @@ pub struct State {
 }
 
 impl State {
-    pub fn handle_msg(&mut self, msg: CtlMessage) -> CtlResponse {
+    pub async fn handle_msg(&mut self, msg: CtlMessage) -> CtlResponse {
         match msg {
             CtlMessage::Add { name, addr, port } => {
                 // Check if name is already used
@@ -55,14 +59,23 @@ impl State {
                     }
                 };
 
+                let stream = match TcpStream::connect((Ipv4Addr::from_bits(addr), port)).await {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        return CtlResponse::Error(format!(
+                            "Failed to connect to {}:{port} - {e}",
+                            Ipv4Addr::from_bits(addr)
+                        ));
+                    }
+                };
+
                 let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
-                tokio::spawn(conn_task(master, shutdown_rx));
+                tokio::spawn(conn_task(master, stream, shutdown_rx));
                 self.conns.push(Connection {
                     name,
                     addr,
                     port,
-                    socket: None,
                     shutdown_tx,
                     slave_path: slave_name.clone(),
                 });
@@ -95,15 +108,20 @@ impl State {
     }
 }
 
-async fn conn_task(mut master: AsyncPty, mut shutdown_rx: oneshot::Receiver<()>) {
-    let mut buf = [0; 128];
+async fn conn_task(
+    mut master: AsyncPty,
+    mut sock: TcpStream,
+    mut shutdown_rx: oneshot::Receiver<()>,
+) {
+    let mut pty_buf = [0; MAX_MESSAGE_LEN as usize];
+    let mut sock_buf = BytesMut::new();
     loop {
         select! {
             _ = &mut shutdown_rx => {
                 println!("Shutting down connection task");
                 break;
             }
-            res = master.read(&mut buf) => {
+            res = master.read(&mut pty_buf) => {
                 match res {
                     Ok(PtyReadResult::TermiosChange(c)) => {
                         println!("Termios settings changed: ");
@@ -113,8 +131,10 @@ async fn conn_task(mut master: AsyncPty, mut shutdown_rx: oneshot::Receiver<()>)
                         println!("   Stop bits: {}", c.stop_bits);
                     }
                     Ok(PtyReadResult::Data(n)) => {
-                        let data = String::from_utf8_lossy(&buf[..n]);
+                        let data = String::from_utf8_lossy(&pty_buf[..n]);
                         println!("Received from pty: {data}");
+                        encode_message(MessageHeader::data(n as u8), &pty_buf[..n], &mut sock_buf).expect("Something went wrong");
+                        sock.write_all(&sock_buf).await.expect("Failed to send data to sock");
                     }
                     Ok(PtyReadResult::ControlMessage(c)) => {
                         println!("Received other ctrl message: {}", c);
