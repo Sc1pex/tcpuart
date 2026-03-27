@@ -136,6 +136,7 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "tokio-util",
 ]
 
 [[package]]
@@ -432,6 +433,7 @@ name = "test-server"
 version = "0.1.0"
 dependencies = [
  "common",
+ "futures",
  "tokio",
  "tokio-stream",
  "tokio-util",

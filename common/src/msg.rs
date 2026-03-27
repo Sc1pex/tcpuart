@@ -1,86 +1,91 @@
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BufMut};
 use std::io;
+use tokio_util::codec::{Decoder, Encoder};
 
-pub const MAX_MESSAGE_LEN: u8 = 255;
+pub const MAX_MESSAGE_LEN: usize = 255;
 
-#[repr(u8)]
-#[derive(Clone, Copy, Debug)]
-pub enum MessageKind {
-    Data = 0,
-    Config = 1,
+pub enum Message {
+    Data(u8, [u8; MAX_MESSAGE_LEN]),
+    Config {},
 }
 
-impl TryFrom<u8> for MessageKind {
+impl Message {
+    fn kind(&self) -> u8 {
+        match self {
+            Message::Data(_, _) => 1,
+            Message::Config {} => 2,
+        }
+    }
+}
+
+impl From<&[u8]> for Message {
+    /// Create a data message from a maximum of `MAX_MESSAGE_LEN` bytes
+    fn from(buf: &[u8]) -> Self {
+        let len = buf.len().min(MAX_MESSAGE_LEN);
+        let mut arr = [0; MAX_MESSAGE_LEN];
+        arr[..len].copy_from_slice(&buf[..len]);
+        Self::Data(len as u8, arr)
+    }
+}
+
+pub struct MessageEncoder;
+pub struct MessageDecoder;
+
+impl Encoder<Message> for MessageEncoder {
     type Error = io::Error;
 
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(MessageKind::Data),
-            1 => Ok(MessageKind::Config),
-            _ => Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Invalid message kind: {}", value),
-            )),
+    fn encode(&mut self, item: Message, dst: &mut bytes::BytesMut) -> Result<(), Self::Error> {
+        match item {
+            Message::Data(size, data) => {
+                dst.reserve(2 + size as usize);
+                dst.put_u8(item.kind());
+                dst.put_u8(size);
+                dst.put_slice(&data[..size as usize]);
+                Ok(())
+            }
+            Message::Config {} => todo!(),
         }
     }
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct MessageHeader {
-    pub kind: MessageKind,
-    pub size: u8,
-}
+impl Decoder for MessageDecoder {
+    type Item = Message;
+    type Error = io::Error;
 
-impl MessageHeader {
-    pub fn data(size: u8) -> Self {
-        Self {
-            kind: MessageKind::Data,
-            size,
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let mut cursor = io::Cursor::new(&mut *src);
+
+        let kind = match cursor.try_get_u8() {
+            Ok(kind) => kind,
+            Err(_) => return Ok(None),
+        };
+        let data_len = match cursor.try_get_u8() {
+            Ok(kind) => kind,
+            Err(_) => return Ok(None),
+        };
+
+        if cursor.remaining() < data_len as usize {
+            return Ok(None);
         }
+
+        let item: Message;
+        match kind {
+            1 => {
+                let mut data = [0; MAX_MESSAGE_LEN];
+                cursor.copy_to_slice(&mut data[..data_len as usize]);
+                item = Message::Data(data_len, data);
+            }
+            2 => todo!(),
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Unknown message kind",
+                ))
+            }
+        }
+
+        let bytes_read = cursor.position() as usize;
+        src.advance(bytes_read);
+        Ok(Some(item))
     }
-}
-
-pub fn encode_message(header: MessageHeader, data: &[u8], dst: &mut BytesMut) -> io::Result<()> {
-    if data.len() > MAX_MESSAGE_LEN as usize {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("Data length exceeds maximum of {}", MAX_MESSAGE_LEN),
-        ));
-    }
-
-    // Header is 2 bytes
-    dst.reserve(2 + data.len());
-
-    dst.put_u8(header.kind as u8);
-    dst.put_u8(header.size);
-    dst.put_slice(data);
-
-    Ok(())
-}
-
-pub fn decode_message(src: &mut BytesMut, data: &mut [u8]) -> io::Result<Option<MessageHeader>> {
-    let mut cursor = io::Cursor::new(&mut *src);
-
-    let kind = match cursor.try_get_u8().map(TryInto::try_into) {
-        Ok(Ok(kind)) => kind,
-        Ok(Err(e)) => return Err(e),
-        Err(_) => return Ok(None),
-    };
-    let data_len = match cursor.try_get_u8() {
-        Ok(kind) => kind,
-        Err(_) => return Ok(None),
-    };
-
-    if cursor.remaining() < data_len as usize {
-        return Ok(None);
-    }
-
-    cursor.copy_to_slice(&mut data[..data_len as usize]);
-    let bytes_read = cursor.position() as usize;
-    src.advance(bytes_read);
-    Ok(Some(MessageHeader {
-        kind,
-        size: data_len,
-    }))
 }

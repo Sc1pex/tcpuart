@@ -1,12 +1,13 @@
 use crate::async_pty::{AsyncPty, PtyReadResult};
 use common::{
     ctl::{ConnectionInfo, CtlMessage, CtlResponse},
-    msg::{encode_message, MessageHeader, MAX_MESSAGE_LEN},
+    msg::{MessageEncoder, MAX_MESSAGE_LEN},
 };
+use futures::SinkExt;
 use nix::{fcntl::OFlag, pty};
 use std::net::Ipv4Addr;
-use tokio::{io::AsyncWriteExt, net::TcpStream, select, sync::oneshot};
-use tokio_util::bytes::BytesMut;
+use tokio::{net::TcpStream, select, sync::oneshot};
+use tokio_util::codec::FramedWrite;
 
 #[allow(unused)]
 pub struct Connection {
@@ -113,8 +114,9 @@ async fn conn_task(
     mut sock: TcpStream,
     mut shutdown_rx: oneshot::Receiver<()>,
 ) {
+    let (_reader, writer) = sock.split();
     let mut pty_buf = [0; MAX_MESSAGE_LEN as usize];
-    let mut sock_buf = BytesMut::new();
+    let mut writer = FramedWrite::new(writer, MessageEncoder);
     loop {
         select! {
             _ = &mut shutdown_rx => {
@@ -131,10 +133,14 @@ async fn conn_task(
                         println!("   Stop bits: {}", c.stop_bits);
                     }
                     Ok(PtyReadResult::Data(n)) => {
-                        let data = String::from_utf8_lossy(&pty_buf[..n]);
-                        println!("Received from pty: {data}");
-                        encode_message(MessageHeader::data(n as u8), &pty_buf[..n], &mut sock_buf).expect("Something went wrong");
-                        sock.write_all(&sock_buf).await.expect("Failed to send data to sock");
+                        match writer.send(pty_buf[..n].into()).await {
+                            Ok(_)=> {},
+                            Err(_) => {
+                                // TODO: kill the connection or mark the socket
+                                // as disconnected and try to reconnect later
+                                break;
+                            }
+                        }
                     }
                     Ok(PtyReadResult::ControlMessage(c)) => {
                         println!("Received other ctrl message: {}", c);
