@@ -123,6 +123,9 @@ dependencies = [
  "bytes",
  "clap",
  "common",
+ "futures",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]

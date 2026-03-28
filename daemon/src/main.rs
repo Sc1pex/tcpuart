@@ -1,14 +1,14 @@
-use common::ctl::{CtlMessage, CtlResponse};
+use common::ctl::{CtlMessage, CtlMessageDecoder, CtlResponse, CtlResponseEncoder};
 use futures::SinkExt;
 use state::State;
-use std::{fs, io};
+use std::fs;
 use tokio::{
     net::{UnixListener, UnixStream},
     signal,
     sync::{mpsc, oneshot},
 };
 use tokio_stream::StreamExt;
-use tokio_util::codec::{Decoder, Encoder, FramedRead, FramedWrite};
+use tokio_util::codec::{FramedRead, FramedWrite};
 
 mod async_pty;
 mod state;
@@ -47,33 +47,6 @@ async fn main() {
 
     println!("Cleaning up socket: {}", socket_path);
     let _ = fs::remove_file(&socket_path);
-}
-
-struct CtlMessageDecoder;
-struct CtlResponseEncoder;
-
-impl Decoder for CtlMessageDecoder {
-    type Item = CtlMessage;
-    type Error = io::Error;
-
-    fn decode(
-        &mut self,
-        src: &mut tokio_util::bytes::BytesMut,
-    ) -> Result<Option<Self::Item>, Self::Error> {
-        CtlMessage::decode(src)
-    }
-}
-
-impl Encoder<CtlResponse> for CtlResponseEncoder {
-    type Error = io::Error;
-
-    fn encode(
-        &mut self,
-        item: CtlResponse,
-        dst: &mut tokio_util::bytes::BytesMut,
-    ) -> Result<(), Self::Error> {
-        item.encode(dst)
-    }
 }
 
 async fn handle_stream(

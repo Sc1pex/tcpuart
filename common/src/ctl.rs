@@ -1,5 +1,6 @@
 use bytes::{Buf, BufMut, BytesMut};
 use std::io;
+use tokio_util::codec::{Decoder, Encoder};
 
 #[derive(Debug)]
 pub enum CtlMessage {
@@ -30,25 +31,53 @@ impl CtlMessage {
             CtlMessage::List => 3,
         }
     }
+}
 
-    pub fn encode(&self, dst: &mut BytesMut) -> io::Result<()> {
-        dst.put_u8(self.msg_type());
-
+impl CtlResponse {
+    pub fn msg_type(&self) -> u8 {
         match self {
+            CtlResponse::AddOk(_) => 1,
+            CtlResponse::RemoveOk => 2,
+            CtlResponse::List(_) => 3,
+            CtlResponse::Error(_) => 255,
+        }
+    }
+}
+
+pub struct CtlMessageEncoder;
+pub struct CtlMessageDecoder;
+pub struct CtlResponseEncoder;
+pub struct CtlResponseDecoder;
+
+impl Encoder<CtlMessage> for CtlMessageEncoder {
+    type Error = io::Error;
+
+    fn encode(&mut self, item: CtlMessage, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.put_u8(item.msg_type());
+
+        match item {
             CtlMessage::Add { name, addr, port } => {
-                encode_str(name, dst)?;
-                dst.put_u32(*addr);
-                dst.put_u16(*port);
+                encode_str(&name, dst)?;
+                dst.put_u32(addr);
+                dst.put_u16(port);
             }
             CtlMessage::Remove { name } => {
-                encode_str(name, dst)?;
+                encode_str(&name, dst)?;
             }
             CtlMessage::List => {}
         }
         Ok(())
     }
+}
 
-    pub fn decode(src: &mut BytesMut) -> io::Result<Option<Self>> {
+impl Decoder for CtlMessageDecoder {
+    type Item = CtlMessage;
+    type Error = io::Error;
+
+    fn decode(
+        &mut self,
+        src: &mut tokio_util::bytes::BytesMut,
+    ) -> Result<Option<Self::Item>, Self::Error> {
         let mut cursor = io::Cursor::new(&mut *src);
 
         let message_kind = match cursor.try_get_u8() {
@@ -95,21 +124,18 @@ impl CtlMessage {
     }
 }
 
-impl CtlResponse {
-    pub fn msg_type(&self) -> u8 {
-        match self {
-            CtlResponse::AddOk(_) => 1,
-            CtlResponse::RemoveOk => 2,
-            CtlResponse::List(_) => 3,
-            CtlResponse::Error(_) => 255,
-        }
-    }
+impl Encoder<CtlResponse> for CtlResponseEncoder {
+    type Error = io::Error;
 
-    pub fn encode(&self, dst: &mut BytesMut) -> io::Result<()> {
-        dst.put_u8(self.msg_type());
-        match self {
+    fn encode(
+        &mut self,
+        item: CtlResponse,
+        dst: &mut tokio_util::bytes::BytesMut,
+    ) -> Result<(), Self::Error> {
+        dst.put_u8(item.msg_type());
+        match item {
             CtlResponse::AddOk(pts_path) => {
-                encode_str(pts_path, dst)?;
+                encode_str(&pts_path, dst)?;
             }
             CtlResponse::RemoveOk => {}
             CtlResponse::List(connections) => {
@@ -122,13 +148,18 @@ impl CtlResponse {
                 }
             }
             CtlResponse::Error(msg) => {
-                encode_str(msg, dst)?;
+                encode_str(&msg, dst)?;
             }
         }
         Ok(())
     }
+}
 
-    pub fn decode(src: &mut BytesMut) -> io::Result<Option<Self>> {
+impl Decoder for CtlResponseDecoder {
+    type Item = CtlResponse;
+    type Error = io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let mut cursor = io::Cursor::new(&mut *src);
 
         let message_kind = match cursor.try_get_u8() {

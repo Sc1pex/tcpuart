@@ -1,9 +1,9 @@
-use bytes::BytesMut;
 use clap::{Parser, Subcommand};
-use common::ctl::{CtlMessage, CtlResponse};
-use std::io::{Read, Write};
+use common::ctl::{CtlMessage, CtlMessageEncoder, CtlResponse, CtlResponseDecoder};
+use futures::{SinkExt, StreamExt};
 use std::net::Ipv4Addr;
-use std::os::unix::net::UnixStream;
+use tokio::net::UnixStream;
+use tokio_util::codec::{FramedRead, FramedWrite};
 
 #[derive(Parser)]
 struct Cli {
@@ -29,16 +29,20 @@ enum Command {
     List,
 }
 
-fn main() {
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
     let cli = Cli::parse();
 
-    let mut conn = match UnixStream::connect(cli.socket) {
+    let mut conn = match UnixStream::connect(cli.socket).await {
         Ok(conn) => conn,
         Err(e) => {
             eprintln!("Failed to connect to socket: {}", e);
             return;
         }
     };
+    let (reader, writer) = conn.split();
+    let mut writer = FramedWrite::new(writer, CtlMessageEncoder);
+    let mut reader = FramedRead::new(reader, CtlResponseDecoder);
 
     let message = match cli.command {
         Command::Add { name, addr, port } => {
@@ -56,44 +60,14 @@ fn main() {
         Command::List => CtlMessage::List,
     };
 
-    let mut buf = BytesMut::new();
-    if let Err(e) = message.encode(&mut buf) {
-        eprintln!("Failed to encode message: {}", e);
-        return;
-    }
-    if let Err(e) = conn.write_all(&buf) {
-        eprintln!("Failed to write to socket: {}", e);
-        return;
-    }
-    buf.clear();
+    if let Err(e) = writer.send(message).await {
+        eprintln!("Failed to send message to socket: {e}");
+    };
 
-    let mut temp_buf = [0u8; 1024];
-    loop {
-        let n = match conn.read(&mut temp_buf) {
-            Ok(0) => {
-                eprintln!("Daemon closed connection unexpectedly");
-                return;
-            }
-            Ok(n) => n,
-            Err(e) => {
-                eprintln!("Failed to read from socket: {}", e);
-                return;
-            }
-        };
-
-        buf.extend_from_slice(&temp_buf[..n]);
-
-        match CtlResponse::decode(&mut buf) {
-            Ok(Some(response)) => {
-                handle_response(response);
-                break;
-            }
-            Ok(None) => continue,
-            Err(e) => {
-                eprintln!("Failed to decode response: {}", e);
-                return;
-            }
-        }
+    match reader.next().await {
+        Some(Ok(resp)) => handle_response(resp),
+        Some(Err(e)) => eprintln!("Failed to decode daemon response: {e}"),
+        None => eprintln!("Daemon closed connection unexpectedly"),
     }
 }
 
