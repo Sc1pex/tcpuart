@@ -4,9 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bytes = "1.11.1"
-clap = { version = "4.6.0", features = ["derive"] }
-common = { path = "../common" }
-futures = "0.3.32"
-tokio = { version = "1.50.0", features = ["macros", "rt", "net", "io-util"] }
-tokio-util = { version = "0.7.18", features = ["codec"] }
+common = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "net"] }
+tokio-util = { workspace = true, features = ["codec"] }
+futures = { workspace = true }
+clap = { workspace = true, features = ["derive"] }

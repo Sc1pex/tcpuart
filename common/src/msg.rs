@@ -1,5 +1,5 @@
-use bytes::{Buf, BufMut};
 use std::io;
+use tokio_util::bytes::{Buf, BufMut, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
 
 pub const MAX_MESSAGE_LEN: usize = 255;
@@ -34,7 +34,7 @@ pub struct MessageDecoder;
 impl Encoder<Message> for MessageEncoder {
     type Error = io::Error;
 
-    fn encode(&mut self, item: Message, dst: &mut bytes::BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: Message, dst: &mut BytesMut) -> Result<(), Self::Error> {
         match item {
             Message::Data(size, data) => {
                 dst.reserve(2 + size as usize);
@@ -52,7 +52,7 @@ impl Decoder for MessageDecoder {
     type Item = Message;
     type Error = io::Error;
 
-    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let mut cursor = io::Cursor::new(&mut *src);
 
         let kind = match cursor.try_get_u8() {

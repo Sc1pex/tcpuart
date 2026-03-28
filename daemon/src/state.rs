@@ -3,11 +3,10 @@ use common::{
     ctl::{ConnectionInfo, CtlMessage, CtlResponse},
     msg::{Message, MessageDecoder, MessageEncoder, MAX_MESSAGE_LEN},
 };
-use futures::SinkExt;
+use futures::{SinkExt, StreamExt};
 use nix::{fcntl::OFlag, pty};
 use std::net::Ipv4Addr;
 use tokio::{io::AsyncWriteExt, net::TcpStream, select, sync::oneshot};
-use tokio_stream::StreamExt;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 #[allow(unused)]
@@ -148,7 +147,7 @@ async fn conn_task(
                         println!("Received other ctrl message: {}", c);
                     }
                     Err(e) => {
-                        eprintln!("Failed to read from pty: {e} {}", e.kind());
+                        eprintln!("Failed to read from pty: {e}");
                         continue;
                     }
                 }

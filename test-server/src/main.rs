@@ -1,16 +1,15 @@
 use common::msg::{MessageDecoder, MessageEncoder, MAX_MESSAGE_LEN};
-use futures::SinkExt;
+use futures::{SinkExt, StreamExt};
 use std::io;
 use tokio::{
-    io::AsyncReadExt,
+    io::{AsyncReadExt, stdin},
     net::{TcpListener, TcpStream},
     select,
     sync::broadcast,
 };
-use tokio_stream::StreamExt;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> io::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:15113").await?;
 
@@ -19,7 +18,7 @@ async fn main() -> io::Result<()> {
     tokio::spawn(async move {
         let mut buf = [0; MAX_MESSAGE_LEN as usize];
         loop {
-            let n = tokio::io::stdin().read(&mut buf).await.unwrap();
+            let n = stdin().read(&mut buf).await.unwrap();
             if n == 0 {
                 break;
             }

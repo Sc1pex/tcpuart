@@ -1,5 +1,5 @@
 use common::ctl::{CtlMessage, CtlMessageDecoder, CtlResponse, CtlResponseEncoder};
-use futures::SinkExt;
+use futures::{SinkExt, StreamExt};
 use state::State;
 use std::fs;
 use tokio::{
@@ -7,7 +7,6 @@ use tokio::{
     signal,
     sync::{mpsc, oneshot},
 };
-use tokio_stream::StreamExt;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 mod async_pty;

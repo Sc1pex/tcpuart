@@ -1,3 +1,17 @@
 [workspace]
 resolver = "3"
-members = ["cli", "common","daemon", "test-server"]
+members = ["cli", "common", "daemon", "test-server"]
+
+[workspace.dependencies]
+tokio = "1.50.0"
+tokio-util = "0.7.18"
+futures = "0.3.32"
+nix = "0.31.2"
+clap = "4.6.0"
+common = { path = "./common" }
+
+[profile.release]
+lto = true
+opt-level = "z"
+strip = true
+codegen-units = 1

@@ -1,4 +1,4 @@
-use bytes::{Buf, BufMut, BytesMut};
+use tokio_util::bytes::{Buf, BufMut, BytesMut};
 use std::io;
 use tokio_util::codec::{Decoder, Encoder};
 
