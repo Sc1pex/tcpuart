@@ -36,7 +36,7 @@ async fn main() {
     let mut conn = match UnixStream::connect(cli.socket).await {
         Ok(conn) => conn,
         Err(e) => {
-            eprintln!("Failed to connect to socket: {}", e);
+            eprintln!("Failed to connect to socket: {e}");
             return;
         }
     };
@@ -47,7 +47,7 @@ async fn main() {
     let message = match cli.command {
         Command::Add { name, addr, port } => {
             let addr: Ipv4Addr = addr.parse().unwrap_or_else(|_| {
-                eprintln!("Invalid IP address: {}", addr);
+                eprintln!("Invalid IP address: {addr}");
                 std::process::exit(1);
             });
             CtlMessage::Add {
@@ -62,7 +62,7 @@ async fn main() {
 
     if let Err(e) = writer.send(message).await {
         eprintln!("Failed to send message to socket: {e}");
-    };
+    }
 
     match reader.next().await {
         Some(Ok(resp)) => handle_response(resp),
@@ -74,10 +74,10 @@ async fn main() {
 fn handle_response(resp: CtlResponse) {
     match resp {
         CtlResponse::AddOk(pts_path) => {
-            println!("Successfully added connection. PTY device: {}", pts_path);
+            println!("Successfully added connection. PTY device: {pts_path}");
         }
         CtlResponse::Error(msg) => {
-            eprintln!("Error from daemon: {}", msg);
+            eprintln!("Error from daemon: {msg}");
         }
         CtlResponse::RemoveOk => {
             println!("Successfully removed connection");

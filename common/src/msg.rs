@@ -4,6 +4,9 @@ use tokio_util::codec::{Decoder, Encoder};
 
 pub const MAX_MESSAGE_LEN: usize = 255;
 
+// Message is short-lived (created, sent, dropped immediately) and never stored
+// in collections. Stack allocation is better than heap allocation for this usecase
+#[allow(clippy::large_enum_variant)]
 pub enum Message {
     Data(u8, [u8; MAX_MESSAGE_LEN]),
     Config {},
@@ -55,13 +58,11 @@ impl Decoder for MessageDecoder {
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let mut cursor = io::Cursor::new(&mut *src);
 
-        let kind = match cursor.try_get_u8() {
-            Ok(kind) => kind,
-            Err(_) => return Ok(None),
+        let Ok(kind) = cursor.try_get_u8() else {
+            return Ok(None);
         };
-        let data_len = match cursor.try_get_u8() {
-            Ok(kind) => kind,
-            Err(_) => return Ok(None),
+        let Ok(data_len) = cursor.try_get_u8() else {
+            return Ok(None);
         };
 
         if cursor.remaining() < data_len as usize {

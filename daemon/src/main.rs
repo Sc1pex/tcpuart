@@ -35,7 +35,7 @@ async fn main() {
                         let msg_tx = msg_tx.clone();
                         tokio::spawn(async move { handle_stream(stream, msg_tx).await });
                     }
-                    Err(e) => eprintln!("Accept error: {}", e),
+                    Err(e) => eprintln!("Accept error: {e}"),
                 }
             }
             Some((msg, send)) = msg_rx.recv() => {
@@ -48,7 +48,7 @@ async fn main() {
         }
     }
 
-    println!("Cleaning up socket: {}", socket_path);
+    println!("Cleaning up socket: {socket_path}");
     let _ = fs::remove_file(&socket_path);
 }
 
@@ -77,7 +77,7 @@ async fn handle_stream(
                     .await
                     .expect("Failed to send message to user");
             }
-            Err(e) => eprintln!("Received invalid message: {}", e),
+            Err(e) => eprintln!("Received invalid message: {e}"),
         }
     }
 }
@@ -86,26 +86,23 @@ async fn handle_message(state: &mut State, msg: CtlMessage) -> CtlResponse {
     match msg {
         CtlMessage::Add { name, addr, port } => {
             if state.exists(&name) {
-                return CtlResponse::Error(format!(
-                    "Connection with name '{}' already exists",
-                    name
-                ));
+                return CtlResponse::Error(format!("Connection with name '{name}' already exists"));
             }
 
             let master = match pty::posix_openpt(OFlag::O_RDWR | OFlag::O_NOCTTY) {
                 Ok(master) => master,
-                Err(e) => return CtlResponse::Error(format!("Failed to create pty: {}", e)),
+                Err(e) => return CtlResponse::Error(format!("Failed to create pty: {e}")),
             };
             if let Err(e) = pty::grantpt(&master) {
-                return CtlResponse::Error(format!("Failed to grant pty: {}", e));
+                return CtlResponse::Error(format!("Failed to grant pty: {e}"));
             }
             if let Err(e) = pty::unlockpt(&master) {
-                return CtlResponse::Error(format!("Failed to unlock pty: {}", e));
+                return CtlResponse::Error(format!("Failed to unlock pty: {e}"));
             }
 
             let slave_name = match unsafe { pty::ptsname(&master) } {
                 Ok(name) => name,
-                Err(e) => return CtlResponse::Error(format!("Failed to get pts name: {}", e)),
+                Err(e) => return CtlResponse::Error(format!("Failed to get pts name: {e}")),
             };
 
             let master = match AsyncPty::new(master) {

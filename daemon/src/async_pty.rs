@@ -93,25 +93,23 @@ impl AsyncPty {
                         if n > 1 {
                             return Ok(PtyReadResult::Data(n - 1));
                         }
-                    } else {
-                        if ctrl[0] & TIOCPKT_IOCTL != 0 {
-                            let mut new_tio = termios::tcgetattr(&self.slave_fd)?;
-                            if new_tio != self.current_tio {
-                                // Re-assert EXTPROC if it was cleared by the slave app
-                                if !new_tio.local_flags.contains(termios::LocalFlags::EXTPROC) {
-                                    set_extproc(self.inner.get_ref(), &self.slave_fd)?;
-                                    // Refresh after setting
-                                    new_tio = termios::tcgetattr(&self.slave_fd)?;
-                                }
-
-                                self.current_tio = new_tio;
-                                return Ok(PtyReadResult::TermiosChange(get_termios_change(
-                                    &self.current_tio,
-                                )));
+                    } else if ctrl[0] & TIOCPKT_IOCTL != 0 {
+                        let mut new_tio = termios::tcgetattr(&self.slave_fd)?;
+                        if new_tio != self.current_tio {
+                            // Re-assert EXTPROC if it was cleared by the slave app
+                            if !new_tio.local_flags.contains(termios::LocalFlags::EXTPROC) {
+                                set_extproc(self.inner.get_ref(), &self.slave_fd)?;
+                                // Refresh after setting
+                                new_tio = termios::tcgetattr(&self.slave_fd)?;
                             }
-                        } else {
-                            return Ok(PtyReadResult::ControlMessage(ctrl[0]));
+
+                            self.current_tio = new_tio;
+                            return Ok(PtyReadResult::TermiosChange(get_termios_change(
+                                &self.current_tio,
+                            )));
                         }
+                    } else {
+                        return Ok(PtyReadResult::ControlMessage(ctrl[0]));
                     }
                 }
                 Err(nix::errno::Errno::EAGAIN) => {
@@ -154,9 +152,8 @@ impl AsyncWrite for AsyncPty {
         loop {
             let mut guard = ready!(self.inner.poll_write_ready(cx))?;
 
-            match guard.try_io(|inner| inner.get_ref().write(buf)) {
-                Ok(result) => return Poll::Ready(result),
-                Err(_would_block) => continue,
+            if let Ok(result) = guard.try_io(|inner| inner.get_ref().write(buf)) {
+                return Poll::Ready(result);
             }
         }
     }

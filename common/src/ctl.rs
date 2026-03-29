@@ -1,6 +1,8 @@
-use tokio_util::bytes::{Buf, BufMut, BytesMut};
 use std::io;
-use tokio_util::codec::{Decoder, Encoder};
+use tokio_util::{
+    bytes::{Buf, BufMut, BytesMut},
+    codec::{Decoder, Encoder},
+};
 
 #[derive(Debug)]
 pub enum CtlMessage {
@@ -80,31 +82,26 @@ impl Decoder for CtlMessageDecoder {
     ) -> Result<Option<Self::Item>, Self::Error> {
         let mut cursor = io::Cursor::new(&mut *src);
 
-        let message_kind = match cursor.try_get_u8() {
-            Ok(kind) => kind,
-            Err(_) => return Ok(None),
+        let Ok(message_kind) = cursor.try_get_u8() else {
+            return Ok(None);
         };
 
         let msg = match message_kind {
             1 => {
-                let name = match decode_str(&mut cursor)? {
-                    Some(name) => name,
-                    None => return Ok(None),
+                let Some(name) = decode_str(&mut cursor)? else {
+                    return Ok(None);
                 };
-                let addr = match cursor.try_get_u32() {
-                    Ok(addr) => addr,
-                    Err(_) => return Ok(None),
+                let Ok(addr) = cursor.try_get_u32() else {
+                    return Ok(None);
                 };
-                let port = match cursor.try_get_u16() {
-                    Ok(port) => port,
-                    Err(_) => return Ok(None),
+                let Ok(port) = cursor.try_get_u16() else {
+                    return Ok(None);
                 };
                 CtlMessage::Add { name, addr, port }
             }
             2 => {
-                let name = match decode_str(&mut cursor)? {
-                    Some(name) => name,
-                    None => return Ok(None),
+                let Some(name) = decode_str(&mut cursor)? else {
+                    return Ok(None);
                 };
                 CtlMessage::Remove { name }
             }
@@ -162,42 +159,35 @@ impl Decoder for CtlResponseDecoder {
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let mut cursor = io::Cursor::new(&mut *src);
 
-        let message_kind = match cursor.try_get_u8() {
-            Ok(kind) => kind,
-            Err(_) => return Ok(None),
+        let Ok(message_kind) = cursor.try_get_u8() else {
+            return Ok(None);
         };
 
         let response = match message_kind {
             1 => {
-                let pts_path = match decode_str(&mut cursor)? {
-                    Some(path) => path,
-                    None => return Ok(None),
+                let Some(pts_path) = decode_str(&mut cursor)? else {
+                    return Ok(None);
                 };
                 CtlResponse::AddOk(pts_path)
             }
             2 => CtlResponse::RemoveOk,
             3 => {
-                let count = match cursor.try_get_u16() {
-                    Ok(count) => count,
-                    Err(_) => return Ok(None),
+                let Ok(count) = cursor.try_get_u16() else {
+                    return Ok(None);
                 };
                 let mut connections = Vec::with_capacity(count as usize);
                 for _ in 0..count {
-                    let name = match decode_str(&mut cursor)? {
-                        Some(name) => name,
-                        None => return Ok(None),
+                    let Some(name) = decode_str(&mut cursor)? else {
+                        return Ok(None);
                     };
-                    let addr = match cursor.try_get_u32() {
-                        Ok(addr) => addr,
-                        Err(_) => return Ok(None),
+                    let Ok(addr) = cursor.try_get_u32() else {
+                        return Ok(None);
                     };
-                    let port = match cursor.try_get_u16() {
-                        Ok(port) => port,
-                        Err(_) => return Ok(None),
+                    let Ok(port) = cursor.try_get_u16() else {
+                        return Ok(None);
                     };
-                    let pts_path = match decode_str(&mut cursor)? {
-                        Some(path) => path,
-                        None => return Ok(None),
+                    let Some(pts_path) = decode_str(&mut cursor)? else {
+                        return Ok(None);
                     };
                     connections.push(ConnectionInfo {
                         name,
@@ -209,9 +199,8 @@ impl Decoder for CtlResponseDecoder {
                 CtlResponse::List(connections)
             }
             255 => {
-                let msg = match decode_str(&mut cursor)? {
-                    Some(msg) => msg,
-                    None => return Ok(None),
+                let Some(msg) = decode_str(&mut cursor)? else {
+                    return Ok(None);
                 };
                 CtlResponse::Error(msg)
             }
@@ -231,7 +220,7 @@ impl Decoder for CtlResponseDecoder {
 }
 
 fn encode_str(s: &str, dst: &mut BytesMut) -> io::Result<()> {
-    let size = s.as_bytes().len();
+    let size = s.len();
     if size > 255 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,

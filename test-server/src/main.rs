@@ -2,7 +2,7 @@ use common::msg::{MessageDecoder, MessageEncoder, MAX_MESSAGE_LEN};
 use futures::{SinkExt, StreamExt};
 use std::io;
 use tokio::{
-    io::{AsyncReadExt, stdin},
+    io::{stdin, AsyncReadExt},
     net::{TcpListener, TcpStream},
     select,
     sync::broadcast,
@@ -16,7 +16,7 @@ async fn main() -> io::Result<()> {
     let (stdin_tx, stdin_rx) = broadcast::channel(128);
 
     tokio::spawn(async move {
-        let mut buf = [0; MAX_MESSAGE_LEN as usize];
+        let mut buf = [0; MAX_MESSAGE_LEN];
         loop {
             let n = stdin().read(&mut buf).await.unwrap();
             if n == 0 {

@@ -27,8 +27,8 @@ impl Connection {
                 name,
                 addr,
                 port,
-                shutdown_tx,
                 slave_path,
+                shutdown_tx,
             },
             shutdown_rx,
         )
@@ -60,21 +60,17 @@ pub async fn conn_task(
                         println!("   Stop bits: {}", c.stop_bits);
                     }
                     Ok(PtyReadResult::Data(n)) => {
-                        match writer.send(pty_buf[..n].into()).await {
-                            Ok(_)=> {},
-                            Err(_) => {
-                                // TODO: kill the connection or mark the socket
-                                // as disconnected and try to reconnect later
-                                break;
-                            }
+                        if writer.send(pty_buf[..n].into()).await.is_err() {
+                            // TODO: kill the connection or mark the socket
+                            // as disconnected and try to reconnect later
+                            break;
                         }
                     }
                     Ok(PtyReadResult::ControlMessage(c)) => {
-                        println!("Received other ctrl message: {}", c);
+                        println!("Received other ctrl message: {c}");
                     }
                     Err(e) => {
                         eprintln!("Failed to read from pty: {e}");
-                        continue;
                     }
                 }
             }
