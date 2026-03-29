@@ -1,23 +1,5 @@
-use crate::async_pty::{AsyncPty, PtyReadResult};
-use common::{
-    ctl::{ConnectionInfo, CtlMessage, CtlResponse},
-    msg::{Message, MessageDecoder, MessageEncoder, MAX_MESSAGE_LEN},
-};
-use futures::{SinkExt, StreamExt};
-use nix::{fcntl::OFlag, pty};
-use std::net::Ipv4Addr;
-use tokio::{io::AsyncWriteExt, net::TcpStream, select, sync::oneshot};
-use tokio_util::codec::{FramedRead, FramedWrite};
-
-#[allow(unused)]
-pub struct Connection {
-    name: String,
-    addr: u32,
-    port: u16,
-    slave_path: String,
-
-    shutdown_tx: oneshot::Sender<()>,
-}
+use crate::connection::Connection;
+use common::ctl::ConnectionInfo;
 
 #[derive(Default)]
 pub struct State {
@@ -25,145 +7,34 @@ pub struct State {
 }
 
 impl State {
-    pub async fn handle_msg(&mut self, msg: CtlMessage) -> CtlResponse {
-        match msg {
-            CtlMessage::Add { name, addr, port } => {
-                // Check if name is already used
-                if self.conns.iter().any(|c| c.name == name) {
-                    return CtlResponse::Error(format!(
-                        "Connection with name '{}' already exists",
-                        name
-                    ));
-                };
-
-                let master = match pty::posix_openpt(OFlag::O_RDWR | OFlag::O_NOCTTY) {
-                    Ok(master) => master,
-                    Err(e) => return CtlResponse::Error(format!("Failed to create pty: {}", e)),
-                };
-                if let Err(e) = pty::grantpt(&master) {
-                    return CtlResponse::Error(format!("Failed to grant pty: {}", e));
-                }
-                if let Err(e) = pty::unlockpt(&master) {
-                    return CtlResponse::Error(format!("Failed to unlock pty: {}", e));
-                }
-
-                let slave_name = match unsafe { pty::ptsname(&master) } {
-                    Ok(name) => name,
-                    Err(e) => return CtlResponse::Error(format!("Failed to get pts name: {}", e)),
-                };
-
-                let master = match AsyncPty::new(master) {
-                    Ok(master) => master,
-                    Err(e) => {
-                        eprintln!("Failed to create async pty: {e}");
-                        return CtlResponse::Error("Something went wrong".into());
-                    }
-                };
-
-                let stream = match TcpStream::connect((Ipv4Addr::from_bits(addr), port)).await {
-                    Ok(stream) => stream,
-                    Err(e) => {
-                        return CtlResponse::Error(format!(
-                            "Failed to connect to {}:{port} - {e}",
-                            Ipv4Addr::from_bits(addr)
-                        ));
-                    }
-                };
-
-                let (shutdown_tx, shutdown_rx) = oneshot::channel();
-
-                tokio::spawn(conn_task(master, stream, shutdown_rx));
-                self.conns.push(Connection {
-                    name,
-                    addr,
-                    port,
-                    shutdown_tx,
-                    slave_path: slave_name.clone(),
-                });
-                CtlResponse::AddOk(slave_name)
-            }
-            CtlMessage::Remove { name } => {
-                if let Some(pos) = self.conns.iter().position(|c| c.name == name) {
-                    let conn = self.conns.swap_remove(pos);
-                    // If send errors, it means the task has already shut down, so we can ignore it
-                    let _ = conn.shutdown_tx.send(());
-                    CtlResponse::RemoveOk
-                } else {
-                    CtlResponse::Error(format!("No connection found with name: {name}"))
-                }
-            }
-            CtlMessage::List => {
-                let list = self
-                    .conns
-                    .iter()
-                    .map(|c| ConnectionInfo {
-                        name: c.name.clone(),
-                        addr: c.addr,
-                        port: c.port,
-                        pts_path: c.slave_path.clone(),
-                    })
-                    .collect();
-                CtlResponse::List(list)
-            }
-        }
+    pub fn add(&mut self, conn: Connection) {
+        self.conns.push(conn);
     }
-}
 
-async fn conn_task(
-    mut master: AsyncPty,
-    mut sock: TcpStream,
-    mut shutdown_rx: oneshot::Receiver<()>,
-) {
-    let (reader, writer) = sock.split();
-    let mut pty_buf = [0; MAX_MESSAGE_LEN as usize];
-    let mut writer = FramedWrite::new(writer, MessageEncoder);
-    let mut reader = FramedRead::new(reader, MessageDecoder);
-    loop {
-        select! {
-            _ = &mut shutdown_rx => {
-                println!("Shutting down connection task");
-                break;
-            }
-            res = master.read(&mut pty_buf) => {
-                match res {
-                    Ok(PtyReadResult::TermiosChange(c)) => {
-                        println!("Termios settings changed: ");
-                        println!("   Baud: {}", c.baudrate);
-                        println!("   Data bits: {}", c.data_bits);
-                        println!("   Parity: {}", c.parity);
-                        println!("   Stop bits: {}", c.stop_bits);
-                    }
-                    Ok(PtyReadResult::Data(n)) => {
-                        match writer.send(pty_buf[..n].into()).await {
-                            Ok(_)=> {},
-                            Err(_) => {
-                                // TODO: kill the connection or mark the socket
-                                // as disconnected and try to reconnect later
-                                break;
-                            }
-                        }
-                    }
-                    Ok(PtyReadResult::ControlMessage(c)) => {
-                        println!("Received other ctrl message: {}", c);
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to read from pty: {e}");
-                        continue;
-                    }
-                }
-            }
-            Some(msg) = reader.next() => {
-                match msg {
-                    Ok(msg) => {
-                        if let Message::Data(size, data) = msg {
-                            let _ = master.write_all(&data[..size as usize]).await;
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Received invalid message from server: {e}");
-                    }
-                }
-            }
-        }
+    pub fn remove(&mut self, name: &str) -> bool {
+        let Some(pos) = self.conns.iter().position(|c| c.name == name) else {
+            return false;
+        };
+
+        let conn = self.conns.swap_remove(pos);
+        // If send errors, it means the task has already shut down, so we can ignore it
+        let _ = conn.shutdown_tx.send(());
+        true
+    }
+
+    pub fn list(&self) -> Vec<ConnectionInfo> {
+        self.conns
+            .iter()
+            .map(|c| ConnectionInfo {
+                name: c.name.clone(),
+                addr: c.addr,
+                port: c.port,
+                pts_path: c.slave_path.clone(),
+            })
+            .collect()
+    }
+
+    pub fn exists(&self, name: &str) -> bool {
+        self.conns.iter().any(|c| c.name == name)
     }
 }
