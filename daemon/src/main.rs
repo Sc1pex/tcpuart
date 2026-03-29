@@ -1,6 +1,7 @@
 use async_pty::AsyncPty;
 use common::ctl::{CtlMessage, CtlMessageDecoder, CtlResponse, CtlResponseEncoder};
 use connection::{conn_task, Connection};
+use event::DaemonEvent;
 use futures::{SinkExt, StreamExt};
 use nix::{fcntl::OFlag, pty};
 use state::State;
@@ -14,6 +15,7 @@ use tokio_util::codec::{FramedRead, FramedWrite};
 
 mod async_pty;
 mod connection;
+mod event;
 mod state;
 
 #[tokio::main(flavor = "current_thread")]
@@ -24,7 +26,7 @@ async fn main() {
     let _ = fs::remove_file(&socket_path);
 
     let mut state = State::default();
-    let (msg_tx, mut msg_rx) = mpsc::channel(128);
+    let (event_tx, mut event_rx) = mpsc::channel(128);
 
     let listener = UnixListener::bind(&socket_path).expect("Failed to bind to socket");
     loop {
@@ -32,15 +34,22 @@ async fn main() {
             res = listener.accept() => {
                 match res {
                     Ok((stream, _)) => {
-                        let msg_tx = msg_tx.clone();
-                        tokio::spawn(async move { handle_stream(stream, msg_tx).await });
+                        let event_tx = event_tx.clone();
+                        tokio::spawn(async move { handle_stream(stream, event_tx).await });
                     }
                     Err(e) => eprintln!("Accept error: {e}"),
                 }
             }
-            Some((msg, send)) = msg_rx.recv() => {
-                let resp = handle_message(&mut state, msg).await;
-                let _ = send.send(resp);
+            Some(event) = event_rx.recv() => {
+                match event {
+                    DaemonEvent::CliCommand(ctl_message, sender) => {
+                        let resp = handle_ctl_message(&mut state, ctl_message, event_tx.clone()).await;
+                        let _ = sender.send(resp);
+                    }
+                    DaemonEvent::ConnectionClosed(name) => {
+                        state.remove(&name);
+                    }
+                }
             }
             _ = signal::ctrl_c() => {
                 break;
@@ -52,10 +61,7 @@ async fn main() {
     let _ = fs::remove_file(&socket_path);
 }
 
-async fn handle_stream(
-    mut stream: UnixStream,
-    msg_tx: mpsc::Sender<(CtlMessage, oneshot::Sender<CtlResponse>)>,
-) {
+async fn handle_stream(mut stream: UnixStream, event_tx: mpsc::Sender<DaemonEvent>) {
     let (reader, writer) = stream.split();
     let mut reader = FramedRead::new(reader, CtlMessageDecoder);
     let mut writer = FramedWrite::new(writer, CtlResponseEncoder);
@@ -64,7 +70,11 @@ async fn handle_stream(
         match msg {
             Ok(msg) => {
                 let (tx, rx) = oneshot::channel();
-                if msg_tx.send((msg, tx)).await.is_err() {
+                if event_tx
+                    .send(DaemonEvent::CliCommand(msg, tx))
+                    .await
+                    .is_err()
+                {
                     // Main tasked closed
                     return;
                 }
@@ -82,7 +92,11 @@ async fn handle_stream(
     }
 }
 
-async fn handle_message(state: &mut State, msg: CtlMessage) -> CtlResponse {
+async fn handle_ctl_message(
+    state: &mut State,
+    msg: CtlMessage,
+    event_tx: mpsc::Sender<DaemonEvent>,
+) -> CtlResponse {
     match msg {
         CtlMessage::Add { name, addr, port } => {
             if state.exists(&name) {
@@ -123,10 +137,10 @@ async fn handle_message(state: &mut State, msg: CtlMessage) -> CtlResponse {
                 }
             };
 
-            let (conn, shutdown_rx) = Connection::new(name, addr, port, slave_name.clone());
+            let (conn, shutdown_rx) = Connection::new(name.clone(), addr, port, slave_name.clone());
             state.add(conn);
 
-            tokio::spawn(conn_task(master, stream, shutdown_rx));
+            tokio::spawn(conn_task(name, master, stream, shutdown_rx, event_tx));
             CtlResponse::AddOk(slave_name)
         }
         CtlMessage::Remove { name } => {

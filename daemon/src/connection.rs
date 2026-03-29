@@ -1,7 +1,15 @@
-use crate::async_pty::{AsyncPty, PtyReadResult};
+use crate::{
+    async_pty::{AsyncPty, PtyReadResult},
+    event::DaemonEvent,
+};
 use common::msg::{Message, MessageDecoder, MessageEncoder, MAX_MESSAGE_LEN};
 use futures::{SinkExt, StreamExt};
-use tokio::{io::AsyncWriteExt, net::TcpStream, select, sync::oneshot};
+use tokio::{
+    io::AsyncWriteExt,
+    net::TcpStream,
+    select,
+    sync::{mpsc, oneshot},
+};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 pub struct Connection {
@@ -36,9 +44,11 @@ impl Connection {
 }
 
 pub async fn conn_task(
+    conn_name: String,
     mut master: AsyncPty,
     mut sock: TcpStream,
     mut shutdown_rx: oneshot::Receiver<()>,
+    event_tx: mpsc::Sender<DaemonEvent>,
 ) {
     let (reader, writer) = sock.split();
     let mut pty_buf = [0; MAX_MESSAGE_LEN];
@@ -61,8 +71,6 @@ pub async fn conn_task(
                     }
                     Ok(PtyReadResult::Data(n)) => {
                         if writer.send(pty_buf[..n].into()).await.is_err() {
-                            // TODO: kill the connection or mark the socket
-                            // as disconnected and try to reconnect later
                             break;
                         }
                     }
@@ -71,6 +79,7 @@ pub async fn conn_task(
                     }
                     Err(e) => {
                         eprintln!("Failed to read from pty: {e}");
+                        break;
                     }
                 }
             }
@@ -83,9 +92,14 @@ pub async fn conn_task(
                     }
                     Err(e) => {
                         eprintln!("Received invalid message from server: {e}");
+                        break;
                     }
                 }
             }
         }
     }
+
+    let _ = event_tx
+        .send(DaemonEvent::ConnectionClosed(conn_name))
+        .await;
 }
