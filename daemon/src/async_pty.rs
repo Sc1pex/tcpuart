@@ -36,7 +36,7 @@ const TIOCPKT_IOCTL: u8 = 0x40;
 
 nix::ioctl_write_ptr_bad!(tiocpkt, nix::libc::TIOCPKT, i32);
 
-#[cfg(target_os = "macos")]
+#[cfg(not(target_os = "linux"))]
 nix::ioctl_write_ptr_bad!(tiocextproc, nix::libc::TIOCEXT, i32);
 
 impl AsyncPty {
@@ -95,14 +95,15 @@ impl AsyncPty {
                         }
                     } else if ctrl[0] & TIOCPKT_IOCTL != 0 {
                         let mut new_tio = termios::tcgetattr(&self.slave_fd)?;
-                        if new_tio != self.current_tio {
-                            // Re-assert EXTPROC if it was cleared by the slave app
-                            if !new_tio.local_flags.contains(termios::LocalFlags::EXTPROC) {
-                                set_extproc(self.inner.get_ref(), &self.slave_fd)?;
-                                // Refresh after setting
-                                new_tio = termios::tcgetattr(&self.slave_fd)?;
-                            }
 
+                        // Re-assert EXTPROC if it was cleared by the slave app
+                        if !new_tio.local_flags.contains(termios::LocalFlags::EXTPROC) {
+                            set_extproc(self.inner.get_ref(), &self.slave_fd)?;
+                            // Refresh after setting
+                            new_tio = termios::tcgetattr(&self.slave_fd)?;
+                        }
+
+                        if check_termios_change(&self.current_tio, &new_tio) {
                             self.current_tio = new_tio;
                             return Ok(PtyReadResult::TermiosChange(get_termios_change(
                                 &self.current_tio,
@@ -121,26 +122,6 @@ impl AsyncPty {
             }
         }
     }
-}
-
-#[allow(unused_variables)]
-fn set_extproc(master: &PtyMaster, slave: &OwnedFd) -> io::Result<()> {
-    #[cfg(target_os = "linux")]
-    {
-        let mut tio = termios::tcgetattr(slave)?;
-        tio.local_flags |= termios::LocalFlags::EXTPROC;
-        termios::tcsetattr(slave, termios::SetArg::TCSANOW, &tio)?;
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let on: i32 = 1;
-        unsafe {
-            tiocextproc(master.as_raw_fd(), &on)?;
-        }
-    }
-
-    Ok(())
 }
 
 impl AsyncWrite for AsyncPty {
@@ -167,8 +148,53 @@ impl AsyncWrite for AsyncPty {
     }
 }
 
+fn speed_to_u32(speed: termios::BaudRate) -> u32 {
+    #[cfg(target_os = "linux")]
+    {
+        use termios::BaudRate::*;
+        match speed {
+            B50 => 50,
+            B75 => 75,
+            B110 => 110,
+            B134 => 134,
+            B150 => 150,
+            B200 => 200,
+            B300 => 300,
+            B600 => 600,
+            B1200 => 1200,
+            B1800 => 1800,
+            B2400 => 2400,
+            B4800 => 4800,
+            B9600 => 9600,
+            B19200 => 19200,
+            B38400 => 38400,
+            B57600 => 57600,
+            B115200 => 115200,
+            B230400 => 230400,
+            B460800 => 460800,
+            B500000 => 500000,
+            B576000 => 576000,
+            B921600 => 921600,
+            B1000000 => 1000000,
+            B1152000 => 1152000,
+            B1500000 => 1500000,
+            B2000000 => 2000000,
+            B2500000 => 2500000,
+            B3000000 => 3000000,
+            B3500000 => 3500000,
+            B4000000 => 4000000,
+            _ => 9600,
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        speed as u32
+    }
+}
+
 fn get_termios_change(tio: &termios::Termios) -> TermiosChange {
-    let baudrate = termios::cfgetispeed(tio);
+    let baudrate = speed_to_u32(termios::cfgetispeed(tio));
     let data_bits = match tio.control_flags & termios::ControlFlags::CSIZE {
         termios::ControlFlags::CS5 => 5,
         termios::ControlFlags::CS6 => 6,
@@ -194,9 +220,56 @@ fn get_termios_change(tio: &termios::Termios) -> TermiosChange {
     };
 
     TermiosChange {
-        baudrate: baudrate as u32,
+        baudrate,
         data_bits,
         parity,
         stop_bits,
     }
+}
+
+#[allow(unused_variables)]
+fn set_extproc(master: &PtyMaster, slave: &OwnedFd) -> io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut tio = termios::tcgetattr(slave)?;
+        tio.local_flags |= termios::LocalFlags::EXTPROC;
+        termios::tcsetattr(slave, termios::SetArg::TCSANOW, &tio)?;
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let on: i32 = 1;
+        unsafe {
+            tiocextproc(master.as_raw_fd(), &on)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn check_termios_change(old: &termios::Termios, new: &termios::Termios) -> bool {
+    // Check if baudrate, data bits, parity or stop bits changed
+    let old_baud = termios::cfgetispeed(old);
+    let new_baud = termios::cfgetispeed(new);
+    if old_baud != new_baud {
+        return true;
+    }
+
+    let old_data_bits = old.control_flags & termios::ControlFlags::CSIZE;
+    let new_data_bits = new.control_flags & termios::ControlFlags::CSIZE;
+    if old_data_bits != new_data_bits {
+        return true;
+    }
+
+    let old_parity =
+        old.control_flags & (termios::ControlFlags::PARENB | termios::ControlFlags::PARODD);
+    let new_parity =
+        new.control_flags & (termios::ControlFlags::PARENB | termios::ControlFlags::PARODD);
+    if old_parity != new_parity {
+        return true;
+    }
+
+    let old_stop_bits = old.control_flags & termios::ControlFlags::CSTOPB;
+    let new_stop_bits = new.control_flags & termios::ControlFlags::CSTOPB;
+    return old_stop_bits != new_stop_bits;
 }

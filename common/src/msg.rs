@@ -7,17 +7,22 @@ pub const MAX_MESSAGE_LEN: usize = 255;
 // Message is short-lived (created, sent, dropped immediately) and never stored
 // in collections. Stack allocation is better than heap allocation for this usecase
 #[allow(clippy::large_enum_variant)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum Message {
     Data(u8, [u8; MAX_MESSAGE_LEN]),
-    Config {},
+    Config {
+        baudrate: u32,
+        data_bits: u8,
+        stop_bits: u8,
+        parity: u8,
+    },
 }
 
 impl Message {
     fn kind(&self) -> u8 {
         match self {
             Message::Data(_, _) => 1,
-            Message::Config {} => 2,
+            Message::Config { .. } => 2,
         }
     }
 }
@@ -47,7 +52,21 @@ impl Encoder<Message> for MessageEncoder {
                 dst.put_slice(&data[..size as usize]);
                 Ok(())
             }
-            Message::Config {} => todo!(),
+            Message::Config {
+                baudrate,
+                data_bits,
+                stop_bits,
+                parity,
+            } => {
+                dst.reserve(2 + 7);
+                dst.put_u8(item.kind());
+                dst.put_u8(7);
+                dst.put_u32(baudrate);
+                dst.put_u8(data_bits);
+                dst.put_u8(stop_bits);
+                dst.put_u8(parity);
+                Ok(())
+            }
         }
     }
 }
@@ -77,7 +96,26 @@ impl Decoder for MessageDecoder {
                 cursor.copy_to_slice(&mut data[..data_len as usize]);
                 item = Message::Data(data_len, data);
             }
-            2 => todo!(),
+            2 => {
+                let Ok(baudrate) = cursor.try_get_u32() else {
+                    return Ok(None);
+                };
+                let Ok(data_bits) = cursor.try_get_u8() else {
+                    return Ok(None);
+                };
+                let Ok(stop_bits) = cursor.try_get_u8() else {
+                    return Ok(None);
+                };
+                let Ok(parity) = cursor.try_get_u8() else {
+                    return Ok(None);
+                };
+                item = Message::Config {
+                    baudrate,
+                    data_bits,
+                    stop_bits,
+                    parity,
+                };
+            }
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,

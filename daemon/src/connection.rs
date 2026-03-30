@@ -59,11 +59,15 @@ pub async fn conn_task(
             res = master.read(&mut pty_buf) => {
                 match res {
                     Ok(PtyReadResult::TermiosChange(c)) => {
-                        println!("Termios settings changed: ");
-                        println!("   Baud: {}", c.baudrate);
-                        println!("   Data bits: {}", c.data_bits);
-                        println!("   Parity: {}", c.parity);
-                        println!("   Stop bits: {}", c.stop_bits);
+                        let msg = Message::Config {
+                            baudrate: c.baudrate,
+                            data_bits: c.data_bits,
+                            stop_bits: c.stop_bits,
+                            parity: c.parity
+                        };
+                        if tcp.send(msg).await.is_err() {
+                            break;
+                        }
                     }
                     Ok(PtyReadResult::Data(n)) => {
                         if tcp.send(pty_buf[..n].into()).await.is_err() {
@@ -84,6 +88,8 @@ pub async fn conn_task(
                     Ok(msg) => {
                         if let Message::Data(size, data) = msg {
                             let _ = master.write_all(&data[..size as usize]).await;
+                        } else {
+                            eprintln!("Received unexpected message: {msg:?}");
                         }
                     }
                     Err(_) => {

@@ -49,8 +49,8 @@ async fn handle_conn(mut conn: TcpStream, mut stdin_rx: broadcast::Receiver<Stri
                     Ok(common::msg::Message::Data(size, data)) => {
                         println!("Received data message: {:?}", String::from_utf8_lossy(&data[..size as usize]));
                     }
-                    Ok(common::msg::Message::Config{} ) => {
-                        println!("Received config message");
+                    Ok(common::msg::Message::Config{ baudrate, data_bits, stop_bits, parity } ) => {
+                        println!("Received config message: baudrate={}, data_bits={}, stop_bits={}, parity={:?}", baudrate, data_bits, stop_bits, parity);
                     }
                     Err(e) => {
                         println!("Error receiving: {e}");
