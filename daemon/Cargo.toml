@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 common = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt", "net", "sync", "signal", "io-util"] }
+tokio = { workspace = true, features = ["macros", "rt", "net", "sync", "signal", "io-util", "time"] }
 tokio-util = { workspace = true, features = ["codec"] }
 futures = { workspace = true }
 nix = { workspace = true, features = ["fs", "ioctl", "term", "uio"] }

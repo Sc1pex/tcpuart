@@ -1,16 +1,14 @@
 use crate::{
     async_pty::{AsyncPty, PtyReadResult},
     event::DaemonEvent,
+    tcp_bridge::TcpBridge,
 };
-use common::msg::{Message, MessageDecoder, MessageEncoder, MAX_MESSAGE_LEN};
-use futures::{SinkExt, StreamExt};
+use common::msg::{Message, MAX_MESSAGE_LEN};
 use tokio::{
     io::AsyncWriteExt,
-    net::TcpStream,
     select,
     sync::{mpsc, oneshot},
 };
-use tokio_util::codec::{FramedRead, FramedWrite};
 
 pub struct Connection {
     pub name: String,
@@ -46,14 +44,12 @@ impl Connection {
 pub async fn conn_task(
     conn_name: String,
     mut master: AsyncPty,
-    mut sock: TcpStream,
     mut shutdown_rx: oneshot::Receiver<()>,
+    mut tcp: TcpBridge,
     event_tx: mpsc::Sender<DaemonEvent>,
 ) {
-    let (reader, writer) = sock.split();
     let mut pty_buf = [0; MAX_MESSAGE_LEN];
-    let mut writer = FramedWrite::new(writer, MessageEncoder);
-    let mut reader = FramedRead::new(reader, MessageDecoder);
+
     loop {
         select! {
             _ = &mut shutdown_rx => {
@@ -70,7 +66,7 @@ pub async fn conn_task(
                         println!("   Stop bits: {}", c.stop_bits);
                     }
                     Ok(PtyReadResult::Data(n)) => {
-                        if writer.send(pty_buf[..n].into()).await.is_err() {
+                        if tcp.send(pty_buf[..n].into()).await.is_err() {
                             break;
                         }
                     }
@@ -83,15 +79,14 @@ pub async fn conn_task(
                     }
                 }
             }
-            Some(msg) = reader.next() => {
+            msg = tcp.next() => {
                 match msg {
                     Ok(msg) => {
                         if let Message::Data(size, data) = msg {
                             let _ = master.write_all(&data[..size as usize]).await;
                         }
                     }
-                    Err(e) => {
-                        eprintln!("Received invalid message from server: {e}");
+                    Err(_) => {
                         break;
                     }
                 }

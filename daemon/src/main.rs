@@ -5,9 +5,10 @@ use event::DaemonEvent;
 use futures::{SinkExt, StreamExt};
 use nix::{fcntl::OFlag, pty};
 use state::State;
-use std::{fs, net::Ipv4Addr};
+use std::fs;
+use tcp_bridge::TcpBridge;
 use tokio::{
-    net::{TcpStream, UnixListener, UnixStream},
+    net::{UnixListener, UnixStream},
     signal,
     sync::{mpsc, oneshot},
 };
@@ -17,6 +18,7 @@ mod async_pty;
 mod connection;
 mod event;
 mod state;
+mod tcp_bridge;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
@@ -127,20 +129,11 @@ async fn handle_ctl_message(
                 }
             };
 
-            let stream = match TcpStream::connect((Ipv4Addr::from_bits(addr), port)).await {
-                Ok(stream) => stream,
-                Err(e) => {
-                    return CtlResponse::Error(format!(
-                        "Failed to connect to {}:{port} - {e}",
-                        Ipv4Addr::from_bits(addr)
-                    ));
-                }
-            };
-
             let (conn, shutdown_rx) = Connection::new(name.clone(), addr, port, slave_name.clone());
             state.add(conn);
 
-            tokio::spawn(conn_task(name, master, stream, shutdown_rx, event_tx));
+            let tcp = TcpBridge::new(addr, port);
+            tokio::spawn(conn_task(name, master, shutdown_rx, tcp, event_tx));
             CtlResponse::AddOk(slave_name)
         }
         CtlMessage::Remove { name } => {

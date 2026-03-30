@@ -7,6 +7,7 @@ pub const MAX_MESSAGE_LEN: usize = 255;
 // Message is short-lived (created, sent, dropped immediately) and never stored
 // in collections. Stack allocation is better than heap allocation for this usecase
 #[allow(clippy::large_enum_variant)]
+#[derive(Copy, Clone)]
 pub enum Message {
     Data(u8, [u8; MAX_MESSAGE_LEN]),
     Config {},
@@ -88,5 +89,26 @@ impl Decoder for MessageDecoder {
         let bytes_read = cursor.position() as usize;
         src.advance(bytes_read);
         Ok(Some(item))
+    }
+}
+
+pub struct MessageCodec;
+
+impl Encoder<Message> for MessageCodec {
+    type Error = <MessageEncoder as Encoder<Message>>::Error;
+
+    fn encode(&mut self, item: Message, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let mut encoder = MessageEncoder;
+        encoder.encode(item, dst)
+    }
+}
+
+impl Decoder for MessageCodec {
+    type Item = <MessageDecoder as Decoder>::Item;
+    type Error = <MessageDecoder as Decoder>::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let mut decoder = MessageDecoder;
+        decoder.decode(src)
     }
 }
