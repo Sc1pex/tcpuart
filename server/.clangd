@@ -1,0 +1,16 @@
+CompileFlags:
+  Remove:
+    - -mlongcalls
+    - -fno-tree-switch-conversion
+    - -fno-shrink-wrap
+    - -mtext-section-literals
+    - -fstrict-volatile-bitfields
+    - -fno-jump-tables
+    - -fstrict-volatile-bitfields
+    - -fno-tree-switch-conversion
+    - -mfix-esp32-psram-cache-issue
+    - -mfix-esp32-psram-cache-strategy=*
+    - -w
+Diagnostics:
+  Suppress:
+    - pp_file_not_found
