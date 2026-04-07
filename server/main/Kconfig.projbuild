@@ -1,0 +1,19 @@
+menu "TcpUart Server Configuration"
+    config ESP_WIFI_SSID
+        string "WiFi SSID"
+        default "myssid"
+        help
+            WiFi SSID
+
+    config ESP_WIFI_PASSWORD
+        string "WiFi Password"
+        default "mypassword"
+        help
+            WiFi password
+
+    config ESP_WIFI_MAX_RETRIES
+        int "WiFi max retries"
+        default 5
+        help
+            How many times to retry before giving up
+endmenu
