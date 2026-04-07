@@ -16,4 +16,10 @@ menu "TcpUart Server Configuration"
         default 5
         help
             How many times to retry before giving up
+
+    config ESP_TCP_SERVER_PORT
+        int "Port number to listen on"
+        default 15113
+        help
+            Port number to listen on
 endmenu
