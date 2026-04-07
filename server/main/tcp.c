@@ -73,7 +73,7 @@ void handle_client(int client_sock) {
     }
 }
 
-void tcp_task() {
+void tcp_task(void* pvParamters) {
     int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock < 0) {
         ESP_LOGE(TAG, "failed to create socket");
@@ -113,8 +113,4 @@ void tcp_task() {
         ESP_LOGI(TAG, "client connected: " IPSTR, IP2STR((ip4_addr_t*) &client_addr.sin_addr));
         handle_client(client_sock);
     }
-}
-
-void start_tcp_task() {
-    xTaskCreate(tcp_task, "tcp_server", 4096, NULL, 5, NULL);
 }

@@ -7,7 +7,7 @@
 
 static const char* TAG = "uart";
 
-void uart_task() {
+void uart_task(void* pvParamters) {
     uart_config_t cfg = {
         .baud_rate = 115200,
         .data_bits = UART_DATA_8_BITS,
@@ -30,8 +30,4 @@ void uart_task() {
             ESP_LOGI(TAG, "Read %d bytes from UART: %.*s", len, len, data);
         }
     }
-}
-
-void start_uart_task() {
-    xTaskCreate(uart_task, "uart_task", 4096, NULL, 5, NULL);
 }
