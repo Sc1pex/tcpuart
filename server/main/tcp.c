@@ -2,8 +2,10 @@
 #include "esp_netif_ip_addr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
+#include "freertos/queue.h"
 #include "lwip/sockets.h"
 #include "message.h"
+#include "tcp.h"
 
 #define PORT CONFIG_ESP_TCP_SERVER_PORT
 
@@ -61,7 +63,7 @@ void debug_print_message(const Message* msg) {
     }
 }
 
-void handle_client(int client_sock) {
+void handle_client(int client_sock, QueueHandle_t tcp_to_uart_queue) {
     Message msg;
 
     while (1) {
@@ -70,10 +72,17 @@ void handle_client(int client_sock) {
             return;
         }
         debug_print_message(&msg);
+        
+        // Send message to UART task
+        if (xQueueSend(tcp_to_uart_queue, &msg, pdMS_TO_TICKS(100)) != pdTRUE) {
+            ESP_LOGW(TAG, "Failed to send message to UART queue (queue full?)");
+        }
     }
 }
 
 void tcp_task(void* pvParamters) {
+    TcpTaskParams* params = (TcpTaskParams*) pvParamters;
+    
     int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock < 0) {
         ESP_LOGE(TAG, "failed to create socket");
@@ -111,6 +120,6 @@ void tcp_task(void* pvParamters) {
         }
 
         ESP_LOGI(TAG, "client connected: " IPSTR, IP2STR((ip4_addr_t*) &client_addr.sin_addr));
-        handle_client(client_sock);
+        handle_client(client_sock, params->tcp_to_uart_queue);
     }
 }
