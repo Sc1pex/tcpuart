@@ -17,8 +17,7 @@ impl State {
         };
 
         let conn = self.conns.swap_remove(pos);
-        // If send errors, it means the task has already shut down, so we can ignore it
-        let _ = conn.shutdown_tx.send(());
+        conn.shutdown();
         true
     }
 

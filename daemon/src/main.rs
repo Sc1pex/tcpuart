@@ -1,12 +1,11 @@
 use async_pty::AsyncPty;
 use common::ctl::{CtlMessage, CtlMessageDecoder, CtlResponse, CtlResponseEncoder};
-use connection::{conn_task, Connection};
+use connection::ConnectionBuilder;
 use event::DaemonEvent;
 use futures::{SinkExt, StreamExt};
 use nix::{fcntl::OFlag, pty};
 use state::State;
 use std::fs;
-use tcp_bridge::TcpBridge;
 use tokio::{
     net::{UnixListener, UnixStream},
     signal,
@@ -129,11 +128,16 @@ async fn handle_ctl_message(
                 }
             };
 
-            let (conn, shutdown_rx) = Connection::new(name.clone(), addr, port, slave_name.clone());
+            let cb = ConnectionBuilder::new(
+                name.clone(),
+                addr,
+                port,
+                master,
+                slave_name.clone(),
+                event_tx,
+            );
+            let conn = cb.build_and_spawn();
             state.add(conn);
-
-            let tcp = TcpBridge::new(addr, port);
-            tokio::spawn(conn_task(name, master, shutdown_rx, tcp, event_tx));
             CtlResponse::AddOk(slave_name)
         }
         CtlMessage::Remove { name } => {

@@ -25,6 +25,13 @@ impl Message {
             Message::Config { .. } => 2,
         }
     }
+
+    fn data_size(&self) -> usize {
+        match self {
+            Message::Data(len, _) => *len as usize,
+            Message::Config { .. } => 7,
+        }
+    }
 }
 
 impl From<&[u8]> for Message {
@@ -44,11 +51,11 @@ impl Encoder<Message> for MessageEncoder {
     type Error = io::Error;
 
     fn encode(&mut self, item: Message, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        dst.reserve(2 + item.data_size());
+        dst.put_u8(item.kind());
+        dst.put_u8(item.data_size() as u8);
         match item {
             Message::Data(size, data) => {
-                dst.reserve(2 + size as usize);
-                dst.put_u8(item.kind());
-                dst.put_u8(size);
                 dst.put_slice(&data[..size as usize]);
                 Ok(())
             }
@@ -58,9 +65,6 @@ impl Encoder<Message> for MessageEncoder {
                 stop_bits,
                 parity,
             } => {
-                dst.reserve(2 + 7);
-                dst.put_u8(item.kind());
-                dst.put_u8(7);
                 dst.put_u32(baudrate);
                 dst.put_u8(data_bits);
                 dst.put_u8(stop_bits);
@@ -89,12 +93,11 @@ impl Decoder for MessageDecoder {
             return Ok(None);
         }
 
-        let item: Message;
-        match kind {
+        let item = match kind {
             1 => {
                 let mut data = [0; MAX_MESSAGE_LEN];
                 cursor.copy_to_slice(&mut data[..data_len as usize]);
-                item = Message::Data(data_len, data);
+                Message::Data(data_len, data)
             }
             2 => {
                 let Ok(baudrate) = cursor.try_get_u32() else {
@@ -109,20 +112,20 @@ impl Decoder for MessageDecoder {
                 let Ok(parity) = cursor.try_get_u8() else {
                     return Ok(None);
                 };
-                item = Message::Config {
+                Message::Config {
                     baudrate,
                     data_bits,
                     stop_bits,
                     parity,
-                };
+                }
             }
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "Unknown message kind",
-                ))
+                ));
             }
-        }
+        };
 
         let bytes_read = cursor.position() as usize;
         src.advance(bytes_read);

@@ -3,7 +3,7 @@ use crate::{
     event::DaemonEvent,
     tcp_bridge::TcpBridge,
 };
-use common::msg::{Message, MAX_MESSAGE_LEN};
+use common::msg::{MAX_MESSAGE_LEN, Message};
 use tokio::{
     io::AsyncWriteExt,
     select,
@@ -16,37 +16,77 @@ pub struct Connection {
     pub port: u16,
     pub slave_path: String,
 
-    pub shutdown_tx: oneshot::Sender<()>,
+    shutdown_tx: oneshot::Sender<()>,
 }
 
-impl Connection {
+struct ConnectionTaskParams {
+    conn_name: String,
+    master: AsyncPty,
+    tcp: TcpBridge,
+    shutdown_rx: oneshot::Receiver<()>,
+    event_tx: mpsc::Sender<DaemonEvent>,
+}
+
+pub struct ConnectionBuilder {
+    conn: Connection,
+    task_params: Option<ConnectionTaskParams>,
+}
+
+impl ConnectionBuilder {
     pub fn new(
         name: String,
         addr: u32,
         port: u16,
+        master: AsyncPty,
         slave_path: String,
-    ) -> (Self, oneshot::Receiver<()>) {
+        event_tx: mpsc::Sender<DaemonEvent>,
+    ) -> Self {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let tcp = TcpBridge::new(addr, port);
 
-        (
-            Connection {
-                name,
+        Self {
+            conn: Connection {
+                name: name.clone(),
                 addr,
                 port,
                 slave_path,
                 shutdown_tx,
             },
-            shutdown_rx,
-        )
+            task_params: Some(ConnectionTaskParams {
+                conn_name: name,
+                master,
+                shutdown_rx,
+                event_tx,
+                tcp,
+            }),
+        }
+    }
+
+    pub fn build_and_spawn(mut self) -> Connection {
+        let task_params = self
+            .task_params
+            .take()
+            .expect("Task params should be present");
+        tokio::spawn(conn_task(task_params));
+        self.conn
     }
 }
 
-pub async fn conn_task(
-    conn_name: String,
-    mut master: AsyncPty,
-    mut shutdown_rx: oneshot::Receiver<()>,
-    mut tcp: TcpBridge,
-    event_tx: mpsc::Sender<DaemonEvent>,
+impl Connection {
+    pub fn shutdown(self) {
+        // If send errors, it means the task has already shut down, so we can ignore it
+        let _ = self.shutdown_tx.send(());
+    }
+}
+
+async fn conn_task(
+    ConnectionTaskParams {
+        conn_name,
+        mut master,
+        mut shutdown_rx,
+        mut tcp,
+        event_tx,
+    }: ConnectionTaskParams,
 ) {
     let mut pty_buf = [0; MAX_MESSAGE_LEN];
 
