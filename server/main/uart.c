@@ -11,28 +11,29 @@
 
 static const char* TAG = "uart";
 
+#define UART_PORT CONFIG_ESP_UART_PORT_NUM
 #define UART_EVENT_QUEUE_SIZE 16
 
 void apply_config(const ConfigMessage* config) {
     ESP_LOGI(
-        TAG, "Applying UART config: baud_rate=%u, data_bits=%d, stop_bits=%d",
-        ntohl(config->baud_rate), config->data_bits, config->stop_bits
+        TAG, "Applying UART config: baud_rate=%u, data_bits=%d, stop_bits=%d, parity=%d",
+        ntohl(config->baud_rate), config->data_bits, config->stop_bits, config->parity
     );
     uint32_t baud_rate = ntohl(config->baud_rate);
-    ESP_ERROR_CHECK(uart_set_baudrate(UART_NUM_2, baud_rate));
+    ESP_ERROR_CHECK(uart_set_baudrate(UART_PORT, baud_rate));
 
     switch (config->data_bits) {
     case 5:
-        ESP_ERROR_CHECK(uart_set_word_length(UART_NUM_2, UART_DATA_5_BITS));
+        ESP_ERROR_CHECK(uart_set_word_length(UART_PORT, UART_DATA_5_BITS));
         break;
     case 6:
-        ESP_ERROR_CHECK(uart_set_word_length(UART_NUM_2, UART_DATA_6_BITS));
+        ESP_ERROR_CHECK(uart_set_word_length(UART_PORT, UART_DATA_6_BITS));
         break;
     case 7:
-        ESP_ERROR_CHECK(uart_set_word_length(UART_NUM_2, UART_DATA_7_BITS));
+        ESP_ERROR_CHECK(uart_set_word_length(UART_PORT, UART_DATA_7_BITS));
         break;
     case 8:
-        ESP_ERROR_CHECK(uart_set_word_length(UART_NUM_2, UART_DATA_8_BITS));
+        ESP_ERROR_CHECK(uart_set_word_length(UART_PORT, UART_DATA_8_BITS));
         break;
     default:
         ESP_LOGE(TAG, "invalid data bits: %d", config->data_bits);
@@ -41,10 +42,10 @@ void apply_config(const ConfigMessage* config) {
 
     switch (config->stop_bits) {
     case 1:
-        ESP_ERROR_CHECK(uart_set_stop_bits(UART_NUM_2, UART_STOP_BITS_1));
+        ESP_ERROR_CHECK(uart_set_stop_bits(UART_PORT, UART_STOP_BITS_1));
         break;
     case 2:
-        ESP_ERROR_CHECK(uart_set_stop_bits(UART_NUM_2, UART_STOP_BITS_2));
+        ESP_ERROR_CHECK(uart_set_stop_bits(UART_PORT, UART_STOP_BITS_2));
         break;
     default:
         ESP_LOGE(TAG, "invalid stop bits: %d", config->stop_bits);
@@ -53,13 +54,13 @@ void apply_config(const ConfigMessage* config) {
 
     switch (config->parity) {
     case 0:
-        ESP_ERROR_CHECK(uart_set_parity(UART_NUM_2, UART_PARITY_DISABLE));
+        ESP_ERROR_CHECK(uart_set_parity(UART_PORT, UART_PARITY_DISABLE));
         break;
     case 1:
-        ESP_ERROR_CHECK(uart_set_parity(UART_NUM_2, UART_PARITY_ODD));
+        ESP_ERROR_CHECK(uart_set_parity(UART_PORT, UART_PARITY_ODD));
         break;
     case 2:
-        ESP_ERROR_CHECK(uart_set_parity(UART_NUM_2, UART_PARITY_EVEN));
+        ESP_ERROR_CHECK(uart_set_parity(UART_PORT, UART_PARITY_EVEN));
         break;
     default:
         ESP_LOGE(TAG, "invalid parity: %d", config->parity);
@@ -80,11 +81,11 @@ void uart_task(void* pvParamters) {
 
     QueueHandle_t uart_event_queue;
     ESP_ERROR_CHECK(
-        uart_driver_install(UART_NUM_2, 1024, 1024, UART_EVENT_QUEUE_SIZE, &uart_event_queue, 0)
+        uart_driver_install(UART_PORT, 1024, 1024, UART_EVENT_QUEUE_SIZE, &uart_event_queue, 0)
     );
-    ESP_ERROR_CHECK(uart_param_config(UART_NUM_2, &cfg));
+    ESP_ERROR_CHECK(uart_param_config(UART_PORT, &cfg));
     ESP_ERROR_CHECK(
-        uart_set_pin(UART_NUM_2, GPIO_NUM_17, GPIO_NUM_16, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE)
+        uart_set_pin(UART_PORT, CONFIG_ESP_UART_TX_PIN, CONFIG_ESP_UART_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE)
     );
 
     QueueSetHandle_t queue_set = xQueueCreateSet(16 + UART_EVENT_QUEUE_SIZE);
@@ -98,7 +99,7 @@ void uart_task(void* pvParamters) {
             Message msg;
             while (xQueueReceive(params->tcp_to_uart_queue, &msg, 0) == pdTRUE) {
                 if (msg.hdr.kind == MESSAGE_KIND_DATA) {
-                    uart_write_bytes(UART_NUM_2, msg.body, msg.hdr.len);
+                    uart_write_bytes(UART_PORT, msg.body, msg.hdr.len);
                 } else if (msg.hdr.kind == MESSAGE_KIND_CONFIG) {
                     if (msg.hdr.len != sizeof(ConfigMessage)) {
                         ESP_LOGE(TAG, "invalid config message length: %d", msg.hdr.len);
@@ -113,7 +114,7 @@ void uart_task(void* pvParamters) {
             if (xQueueReceive(uart_event_queue, &event, 0) == pdTRUE) {
                 if (event.type == UART_DATA) {
                     size_t buffered_len;
-                    uart_get_buffered_data_len(UART_NUM_2, &buffered_len);
+                    uart_get_buffered_data_len(UART_PORT, &buffered_len);
 
                     while (buffered_len > 0) {
                         Message msg;
@@ -122,7 +123,7 @@ void uart_task(void* pvParamters) {
                                              ? MAX_MESSAGE_BODY_SIZE
                                              : buffered_len;
 
-                        int len = uart_read_bytes(UART_NUM_2, msg.body, to_read, 0);
+                        int len = uart_read_bytes(UART_PORT, msg.body, to_read, 0);
                         if (len > 0) {
                             msg.hdr.len = len;
                             xQueueSend(params->uart_to_tcp_queue, &msg, portMAX_DELAY);
@@ -130,7 +131,7 @@ void uart_task(void* pvParamters) {
                             uint64_t val = 1;
                             write(params->uart_to_tcp_efd, &val, sizeof(val));
                         }
-                        uart_get_buffered_data_len(UART_NUM_2, &buffered_len);
+                        uart_get_buffered_data_len(UART_PORT, &buffered_len);
                     }
                 }
             }

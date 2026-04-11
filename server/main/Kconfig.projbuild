@@ -22,4 +22,25 @@ menu "TcpUart Server Configuration"
         default 15113
         help
             Port number to listen on
+
+    menu "UART Configuration"
+        config ESP_UART_PORT_NUM
+            int "UART Port Number (0, 1, or 2)"
+            range 0 2
+            default 2
+            help
+                Which UART hardware peripheral to use. UART0 is usually reserved for console logs.
+
+        config ESP_UART_TX_PIN
+            int "UART TX Pin"
+            default 17
+            help
+                GPIO number for the UART TX signal.
+
+        config ESP_UART_RX_PIN
+            int "UART RX Pin"
+            default 16
+            help
+                GPIO number for the UART RX signal.
+    endmenu
 endmenu
