@@ -47,13 +47,13 @@ void handle_client(int client_sock, TcpTaskParams* params) {
     int opt = 1;
     setsockopt(client_sock, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
 
+    int maxfd = client_sock > params->uart_to_tcp_efd ? client_sock : params->uart_to_tcp_efd;
     while (1) {
         fd_set readfds;
         FD_ZERO(&readfds);
 
         FD_SET(client_sock, &readfds);
         FD_SET(params->uart_to_tcp_efd, &readfds);
-        int maxfd = client_sock > params->uart_to_tcp_efd ? client_sock : params->uart_to_tcp_efd;
 
         int num_ready = select(maxfd + 1, &readfds, NULL, NULL, NULL);
         if (num_ready < 0) {

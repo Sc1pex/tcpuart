@@ -1,5 +1,4 @@
 #include "uart.h"
-#include "cc.h"
 #include "driver/gpio.h"
 #include "driver/uart.h"
 #include "esp_log.h"
@@ -7,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "lwip/sockets.h"
 #include "message.h"
 
 static const char* TAG = "uart";
@@ -48,6 +48,21 @@ void apply_config(const ConfigMessage* config) {
         break;
     default:
         ESP_LOGE(TAG, "invalid stop bits: %d", config->stop_bits);
+        break;
+    }
+
+    switch (config->parity) {
+    case 0:
+        ESP_ERROR_CHECK(uart_set_parity(UART_NUM_2, UART_PARITY_DISABLE));
+        break;
+    case 1:
+        ESP_ERROR_CHECK(uart_set_parity(UART_NUM_2, UART_PARITY_ODD));
+        break;
+    case 2:
+        ESP_ERROR_CHECK(uart_set_parity(UART_NUM_2, UART_PARITY_EVEN));
+        break;
+    default:
+        ESP_LOGE(TAG, "invalid parity: %d", config->parity);
         break;
     }
 }

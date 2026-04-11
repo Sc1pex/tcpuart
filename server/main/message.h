@@ -9,12 +9,12 @@ typedef enum {
     MESSAGE_KIND_CONFIG = 2,
 } MessageKind;
 
-typedef struct {
+typedef struct __attribute__((packed)) {
     uint8_t kind;
     uint8_t len;
 } Header;
 
-typedef struct {
+typedef struct __attribute__((packed)) {
     Header hdr;
     uint8_t body[MAX_MESSAGE_BODY_SIZE];
 } Message;
