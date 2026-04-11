@@ -1,3 +1,4 @@
+#include "esp_vfs_eventfd.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -8,6 +9,8 @@
 
 typedef struct {
     QueueHandle_t tcp_to_uart_queue;
+    QueueHandle_t uart_to_tcp_queue;
+    int uart_to_tcp_efd;
     UartTaskParams uart_params;
     TcpTaskParams tcp_params;
 } AppState;
@@ -15,12 +18,22 @@ typedef struct {
 static AppState s_state;
 
 static void state_init(AppState* state) {
+    esp_vfs_eventfd_config_t cfg = ESP_VFS_EVENTD_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_vfs_eventfd_register(&cfg));
+
     state->tcp_to_uart_queue = xQueueCreate(16, sizeof(Message));
+    state->uart_to_tcp_queue = xQueueCreate(16, sizeof(Message));
+    state->uart_to_tcp_efd = eventfd(0, 0);
 
+    // Initialize task parameters with the shared resources
     state->uart_params.tcp_to_uart_queue = state->tcp_to_uart_queue;
-    state->tcp_params.tcp_to_uart_queue = state->tcp_to_uart_queue;
-}
+    state->uart_params.uart_to_tcp_queue = state->uart_to_tcp_queue;
+    state->uart_params.uart_to_tcp_efd = state->uart_to_tcp_efd;
 
+    state->tcp_params.tcp_to_uart_queue = state->tcp_to_uart_queue;
+    state->tcp_params.uart_to_tcp_queue = state->uart_to_tcp_queue;
+    state->tcp_params.uart_to_tcp_efd = state->uart_to_tcp_efd;
+}
 void app_main(void) {
     state_init(&s_state);
 

@@ -1,3 +1,4 @@
+#include "tcp.h"
 #include "esp_log.h"
 #include "esp_netif_ip_addr.h"
 #include "freertos/FreeRTOS.h"
@@ -5,7 +6,6 @@
 #include "freertos/queue.h"
 #include "lwip/sockets.h"
 #include "message.h"
-#include "tcp.h"
 
 #define PORT CONFIG_ESP_TCP_SERVER_PORT
 
@@ -63,26 +63,58 @@ void debug_print_message(const Message* msg) {
     }
 }
 
-void handle_client(int client_sock, QueueHandle_t tcp_to_uart_queue) {
-    Message msg;
-
+void handle_client(int client_sock, TcpTaskParams* params) {
     while (1) {
-        if (read_msg(client_sock, &msg) < 0) {
-            close(client_sock);
-            return;
+        fd_set readfds;
+        FD_ZERO(&readfds);
+
+        FD_SET(client_sock, &readfds);
+        FD_SET(params->uart_to_tcp_efd, &readfds);
+        int maxfd = client_sock > params->uart_to_tcp_efd ? client_sock : params->uart_to_tcp_efd;
+
+        int num_ready = select(maxfd + 1, &readfds, NULL, NULL, NULL);
+        if (num_ready < 0) {
+            ESP_LOGE(TAG, "select failed");
+            break;
         }
-        debug_print_message(&msg);
-        
-        // Send message to UART task
-        if (xQueueSend(tcp_to_uart_queue, &msg, pdMS_TO_TICKS(100)) != pdTRUE) {
-            ESP_LOGW(TAG, "Failed to send message to UART queue (queue full?)");
+
+        if (FD_ISSET(client_sock, &readfds)) {
+            Message msg;
+            int ret = read_msg(client_sock, &msg);
+            if (ret < 0) {
+                ESP_LOGE(TAG, "failed to read message from client");
+                break;
+            }
+            debug_print_message(&msg);
+            if (xQueueSend(params->tcp_to_uart_queue, &msg, 0) != pdTRUE) {
+                ESP_LOGE(TAG, "Failed to send message to UART queue");
+            }
+        }
+
+        if (FD_ISSET(params->uart_to_tcp_efd, &readfds)) {
+            uint64_t val;
+            read(params->uart_to_tcp_efd, &val, sizeof(val));
+
+            Message msg;
+            while (xQueueReceive(params->uart_to_tcp_queue, &msg, 0) == pdTRUE) {
+                if (send(client_sock, &msg.hdr, sizeof(Header), 0) < 0) {
+                    ESP_LOGE(TAG, "send header failed");
+                    close(client_sock);
+                    return;
+                }
+                if (send(client_sock, msg.body, msg.hdr.len, 0) < 0) {
+                    ESP_LOGE(TAG, "send body failed");
+                    close(client_sock);
+                    return;
+                }
+            }
         }
     }
 }
 
 void tcp_task(void* pvParamters) {
     TcpTaskParams* params = (TcpTaskParams*) pvParamters;
-    
+
     int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock < 0) {
         ESP_LOGE(TAG, "failed to create socket");
@@ -120,6 +152,6 @@ void tcp_task(void* pvParamters) {
         }
 
         ESP_LOGI(TAG, "client connected: " IPSTR, IP2STR((ip4_addr_t*) &client_addr.sin_addr));
-        handle_client(client_sock, params->tcp_to_uart_queue);
+        handle_client(client_sock, params);
     }
 }
