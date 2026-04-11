@@ -1,4 +1,4 @@
-use common::msg::{MAX_MESSAGE_LEN, MessageDecoder, MessageEncoder};
+use common::msg::{MAX_MESSAGE_LEN, MessageControlRes, MessageDecoder, MessageEncoder};
 use futures::{SinkExt, StreamExt};
 use std::io;
 use tokio::{
@@ -39,6 +39,8 @@ async fn handle_conn(mut conn: TcpStream, mut stdin_rx: broadcast::Receiver<Stri
     let mut reader = FramedRead::new(reader, MessageDecoder);
     let mut writer = FramedWrite::new(writer, MessageEncoder);
 
+    let mut last_ctl_resp_status = MessageControlRes::NotSupported;
+
     loop {
         select! {
             Ok(input) = stdin_rx.recv() => {
@@ -54,6 +56,13 @@ async fn handle_conn(mut conn: TcpStream, mut stdin_rx: broadcast::Receiver<Stri
                     }
                     Ok(common::msg::Message::ControlReq(cmd)) => {
                         println!("Received control request: cmd={:?}", cmd);
+                        // For testing, we can just toggle the response status
+                        last_ctl_resp_status = if last_ctl_resp_status == MessageControlRes::Ok {
+                            MessageControlRes::NotSupported
+                        } else {
+                            MessageControlRes::Ok
+                        };
+                        writer.send(common::msg::Message::ControlRes(last_ctl_resp_status)).await.expect("failed to send control response");
                     }
                     Ok(common::msg::Message::ControlRes(status)) => {
                         eprintln!("Unexpected message type: ControlRes with status={:?}", status);

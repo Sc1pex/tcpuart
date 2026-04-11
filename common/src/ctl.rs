@@ -9,6 +9,7 @@ pub enum CtlMessage {
     Add { name: String, addr: u32, port: u16 },
     Remove { name: String },
     List,
+    Reset { name: String },
 }
 
 pub struct ConnectionInfo {
@@ -22,6 +23,7 @@ pub enum CtlResponse {
     AddOk(String),
     RemoveOk,
     List(Vec<ConnectionInfo>),
+    ResetOk,
     Error(String),
 }
 
@@ -31,6 +33,7 @@ impl CtlMessage {
             CtlMessage::Add { .. } => 1,
             CtlMessage::Remove { .. } => 2,
             CtlMessage::List => 3,
+            CtlMessage::Reset { .. } => 4,
         }
     }
 }
@@ -41,6 +44,7 @@ impl CtlResponse {
             CtlResponse::AddOk(_) => 1,
             CtlResponse::RemoveOk => 2,
             CtlResponse::List(_) => 3,
+            CtlResponse::ResetOk => 4,
             CtlResponse::Error(_) => 255,
         }
     }
@@ -67,6 +71,9 @@ impl Encoder<CtlMessage> for CtlMessageEncoder {
                 encode_str(&name, dst)?;
             }
             CtlMessage::List => {}
+            CtlMessage::Reset { name } => {
+                encode_str(&name, dst)?;
+            }
         }
         Ok(())
     }
@@ -106,11 +113,17 @@ impl Decoder for CtlMessageDecoder {
                 CtlMessage::Remove { name }
             }
             3 => CtlMessage::List,
+            4 => {
+                let Some(name) = decode_str(&mut cursor)? else {
+                    return Ok(None);
+                };
+                CtlMessage::Reset { name }
+            }
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "unknown message type",
-                ))
+                ));
             }
         };
 
@@ -144,6 +157,7 @@ impl Encoder<CtlResponse> for CtlResponseEncoder {
                     encode_str(&conn.pts_path, dst)?;
                 }
             }
+            CtlResponse::ResetOk => {}
             CtlResponse::Error(msg) => {
                 encode_str(&msg, dst)?;
             }
@@ -198,6 +212,7 @@ impl Decoder for CtlResponseDecoder {
                 }
                 CtlResponse::List(connections)
             }
+            4 => CtlResponse::ResetOk,
             255 => {
                 let Some(msg) = decode_str(&mut cursor)? else {
                     return Ok(None);
@@ -208,7 +223,7 @@ impl Decoder for CtlResponseDecoder {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "unknown response type",
-                ))
+                ));
             }
         };
 

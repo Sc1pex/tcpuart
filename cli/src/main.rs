@@ -27,6 +27,8 @@ enum Command {
     Remove { name: String },
     /// List active connections
     List,
+    /// Sends a reset signal to the connected device (requires support from the server)
+    Reset { name: String },
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -58,6 +60,7 @@ async fn main() {
         }
         Command::Remove { name } => CtlMessage::Remove { name },
         Command::List => CtlMessage::List,
+        Command::Reset { name } => CtlMessage::Reset { name },
     };
 
     if let Err(e) = writer.send(message).await {
@@ -95,6 +98,9 @@ fn handle_response(resp: CtlResponse) {
                     );
                 }
             }
+        }
+        CtlResponse::ResetOk => {
+            println!("Successfully reset device");
         }
     }
 }

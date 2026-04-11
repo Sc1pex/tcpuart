@@ -3,7 +3,7 @@ use crate::{
     event::DaemonEvent,
     tcp_bridge::TcpBridge,
 };
-use common::msg::{MAX_MESSAGE_LEN, Message};
+use common::msg::{MAX_MESSAGE_LEN, Message, MessageControlReq, MessageControlRes};
 use tokio::{
     io::AsyncWriteExt,
     select,
@@ -17,6 +17,8 @@ pub struct Connection {
     pub slave_path: String,
 
     shutdown_tx: oneshot::Sender<()>,
+    ctl_req_tx: mpsc::Sender<MessageControlReq>,
+    ctl_res_rx: mpsc::Receiver<MessageControlRes>,
 }
 
 struct ConnectionTaskParams {
@@ -25,6 +27,8 @@ struct ConnectionTaskParams {
     tcp: TcpBridge,
     shutdown_rx: oneshot::Receiver<()>,
     event_tx: mpsc::Sender<DaemonEvent>,
+    ctl_req_rx: mpsc::Receiver<MessageControlReq>,
+    ctl_res_tx: mpsc::Sender<MessageControlRes>,
 }
 
 pub struct ConnectionBuilder {
@@ -43,6 +47,8 @@ impl ConnectionBuilder {
     ) -> Self {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let tcp = TcpBridge::new(addr, port);
+        let (ctl_req_tx, ctl_req_rx) = mpsc::channel(8);
+        let (ctl_res_tx, ctl_res_rx) = mpsc::channel(8);
 
         Self {
             conn: Connection {
@@ -51,6 +57,8 @@ impl ConnectionBuilder {
                 port,
                 slave_path,
                 shutdown_tx,
+                ctl_req_tx,
+                ctl_res_rx,
             },
             task_params: Some(ConnectionTaskParams {
                 conn_name: name,
@@ -58,6 +66,8 @@ impl ConnectionBuilder {
                 shutdown_rx,
                 event_tx,
                 tcp,
+                ctl_req_rx,
+                ctl_res_tx,
             }),
         }
     }
@@ -77,6 +87,13 @@ impl Connection {
         // If send errors, it means the task has already shut down, so we can ignore it
         let _ = self.shutdown_tx.send(());
     }
+
+    pub async fn send_ctl_msg(&mut self, ctl: MessageControlReq) -> Option<MessageControlRes> {
+        if self.ctl_req_tx.send(ctl).await.is_err() {
+            return None;
+        }
+        self.ctl_res_rx.recv().await
+    }
 }
 
 async fn conn_task(
@@ -86,6 +103,8 @@ async fn conn_task(
         mut shutdown_rx,
         mut tcp,
         event_tx,
+        mut ctl_req_rx,
+        ctl_res_tx,
     }: ConnectionTaskParams,
 ) {
     let mut pty_buf = [0; MAX_MESSAGE_LEN];
@@ -128,6 +147,10 @@ async fn conn_task(
                     Ok(msg) => {
                         if let Message::Data(size, data) = msg {
                             let _ = master.write_all(&data[..size as usize]).await;
+                        } else if let Message::ControlRes(resp) = msg {
+                            if ctl_res_tx.send(resp).await.is_err() {
+                                break;
+                            }
                         } else {
                             eprintln!("Received unexpected message: {msg:?}");
                         }
@@ -135,6 +158,16 @@ async fn conn_task(
                     Err(_) => {
                         break;
                     }
+                }
+            }
+            ctl_msg = ctl_req_rx.recv() => {
+                if let Some(ctl_msg) = ctl_msg {
+                    let msg = Message::ControlReq(ctl_msg);
+                    if tcp.send(msg).await.is_err() {
+                        break;
+                    }
+                } else {
+                    break;
                 }
             }
         }

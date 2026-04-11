@@ -1,5 +1,8 @@
 use crate::connection::Connection;
-use common::ctl::ConnectionInfo;
+use common::{
+    ctl::ConnectionInfo,
+    msg::{MessageControlReq, MessageControlRes},
+};
 
 #[derive(Default)]
 pub struct State {
@@ -31,6 +34,15 @@ impl State {
                 pts_path: c.slave_path.clone(),
             })
             .collect()
+    }
+
+    pub async fn send_ctl_msg(
+        &mut self,
+        conn_name: &str,
+        ctl: MessageControlReq,
+    ) -> Option<MessageControlRes> {
+        let conn = self.conns.iter_mut().find(|c| c.name == conn_name)?;
+        conn.send_ctl_msg(ctl).await
     }
 
     pub fn exists(&self, name: &str) -> bool {

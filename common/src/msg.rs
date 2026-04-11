@@ -26,7 +26,7 @@ pub enum MessageControlReq {
     Reset = 1,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum MessageControlRes {
     Ok = 1,

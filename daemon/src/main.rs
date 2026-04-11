@@ -1,5 +1,8 @@
 use async_pty::AsyncPty;
-use common::ctl::{CtlMessage, CtlMessageDecoder, CtlResponse, CtlResponseEncoder};
+use common::{
+    ctl::{CtlMessage, CtlMessageDecoder, CtlResponse, CtlResponseEncoder},
+    msg::{MessageControlReq, MessageControlRes},
+};
 use connection::ConnectionBuilder;
 use event::DaemonEvent;
 use futures::{SinkExt, StreamExt};
@@ -148,5 +151,16 @@ async fn handle_ctl_message(
             }
         }
         CtlMessage::List => CtlResponse::List(state.list()),
+        CtlMessage::Reset { name } => {
+            match state.send_ctl_msg(&name, MessageControlReq::Reset).await {
+                Some(resp) => match resp {
+                    MessageControlRes::Ok => CtlResponse::ResetOk,
+                    MessageControlRes::NotSupported => CtlResponse::Error(format!(
+                        "Connection '{name}' does not support reset command"
+                    )),
+                },
+                None => CtlResponse::Error(format!("No connection found with name: {name}")),
+            }
+        }
     }
 }
