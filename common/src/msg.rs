@@ -16,6 +16,47 @@ pub enum Message {
         stop_bits: u8,
         parity: u8,
     },
+    ControlReq(MessageControlReq),
+    ControlRes(MessageControlRes),
+}
+
+#[derive(Copy, Clone, Debug)]
+#[repr(u8)]
+pub enum MessageControlReq {
+    Reset = 1,
+}
+
+#[derive(Copy, Clone, Debug)]
+#[repr(u8)]
+pub enum MessageControlRes {
+    Ok = 1,
+    NotSupported = 2,
+}
+
+impl TryFrom<u8> for MessageControlReq {
+    type Error = io::Error;
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Reset),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Unknown control request",
+            )),
+        }
+    }
+}
+impl TryFrom<u8> for MessageControlRes {
+    type Error = io::Error;
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Ok),
+            2 => Ok(Self::NotSupported),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Unknown control response",
+            )),
+        }
+    }
 }
 
 impl Message {
@@ -23,6 +64,8 @@ impl Message {
         match self {
             Message::Data(_, _) => 1,
             Message::Config { .. } => 2,
+            Message::ControlReq(_) => 3,
+            Message::ControlRes(_) => 4,
         }
     }
 
@@ -30,6 +73,8 @@ impl Message {
         match self {
             Message::Data(len, _) => *len as usize,
             Message::Config { .. } => 7,
+            Message::ControlReq(_) => 1,
+            Message::ControlRes(_) => 1,
         }
     }
 }
@@ -69,6 +114,14 @@ impl Encoder<Message> for MessageEncoder {
                 dst.put_u8(data_bits);
                 dst.put_u8(stop_bits);
                 dst.put_u8(parity);
+                Ok(())
+            }
+            Message::ControlReq(req) => {
+                dst.put_u8(req as u8);
+                Ok(())
+            }
+            Message::ControlRes(res) => {
+                dst.put_u8(res as u8);
                 Ok(())
             }
         }
@@ -118,6 +171,18 @@ impl Decoder for MessageDecoder {
                     stop_bits,
                     parity,
                 }
+            }
+            3 => {
+                let Ok(req) = cursor.try_get_u8().map(MessageControlReq::try_from) else {
+                    return Ok(None);
+                };
+                Message::ControlReq(req?)
+            }
+            4 => {
+                let Ok(res) = cursor.try_get_u8().map(MessageControlRes::try_from) else {
+                    return Ok(None);
+                };
+                Message::ControlRes(res?)
             }
             _ => {
                 return Err(io::Error::new(

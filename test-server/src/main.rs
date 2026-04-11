@@ -1,8 +1,8 @@
-use common::msg::{MessageDecoder, MessageEncoder, MAX_MESSAGE_LEN};
+use common::msg::{MAX_MESSAGE_LEN, MessageDecoder, MessageEncoder};
 use futures::{SinkExt, StreamExt};
 use std::io;
 use tokio::{
-    io::{stdin, AsyncReadExt},
+    io::{AsyncReadExt, stdin},
     net::{TcpListener, TcpStream},
     select,
     sync::broadcast,
@@ -51,6 +51,12 @@ async fn handle_conn(mut conn: TcpStream, mut stdin_rx: broadcast::Receiver<Stri
                     }
                     Ok(common::msg::Message::Config{ baudrate, data_bits, stop_bits, parity } ) => {
                         println!("Received config message: baudrate={}, data_bits={}, stop_bits={}, parity={:?}", baudrate, data_bits, stop_bits, parity);
+                    }
+                    Ok(common::msg::Message::ControlReq(cmd)) => {
+                        println!("Received control request: cmd={:?}", cmd);
+                    }
+                    Ok(common::msg::Message::ControlRes(status)) => {
+                        eprintln!("Unexpected message type: ControlRes with status={:?}", status);
                     }
                     Err(e) => {
                         println!("Error receiving: {e}");
