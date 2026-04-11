@@ -43,27 +43,10 @@ int read_msg(int sock, Message* msg) {
     return 0;
 }
 
-void debug_print_message(const Message* msg) {
-    ESP_LOGI(TAG, "Message kind: %d", msg->hdr.kind);
-    ESP_LOGI(TAG, "Message length: %d", msg->hdr.len);
-    if (msg->hdr.kind == MESSAGE_KIND_DATA) {
-        ESP_LOGI(TAG, "Data: %.*s", msg->hdr.len, msg->body);
-    } else if (msg->hdr.kind == MESSAGE_KIND_CONFIG) {
-        if (msg->hdr.len != sizeof(configmessage)) {
-            ESP_LOGE(TAG, "Invalid config message length");
-            return;
-        }
-        const configmessage* cfg = (const configmessage*) msg->body;
-        ESP_LOGI(
-            TAG, "Config - Baudrate: %u, Data bits: %u, Stop bits: %u, Parity: %u",
-            ntohl(cfg->baudrate), cfg->data_bits, cfg->stop_bits, cfg->parity
-        );
-    } else {
-        ESP_LOGW(TAG, "Unknown message kind");
-    }
-}
-
 void handle_client(int client_sock, TcpTaskParams* params) {
+    int opt = 1;
+    setsockopt(client_sock, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+
     while (1) {
         fd_set readfds;
         FD_ZERO(&readfds);
@@ -85,7 +68,6 @@ void handle_client(int client_sock, TcpTaskParams* params) {
                 ESP_LOGE(TAG, "failed to read message from client");
                 break;
             }
-            debug_print_message(&msg);
             if (xQueueSend(params->tcp_to_uart_queue, &msg, 0) != pdTRUE) {
                 ESP_LOGE(TAG, "Failed to send message to UART queue");
             }

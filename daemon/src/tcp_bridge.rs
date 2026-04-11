@@ -66,6 +66,10 @@ impl TcpBridge {
             loop {
                 match TcpStream::connect((Ipv4Addr::from_bits(self.addr), self.port)).await {
                     Ok(sock) => {
+                        if let Err(e) = sock.set_nodelay(true) {
+                            eprintln!("Failed to set nodelay on client socket: {e}");
+                            return;
+                        };
                         self.framed = Some(Framed::new(sock, MessageCodec));
                         return;
                     }

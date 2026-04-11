@@ -41,7 +41,7 @@ void uart_task(void* pvParamters) {
 
         if (active_queue == params->tcp_to_uart_queue) {
             Message msg;
-            if (xQueueReceive(params->tcp_to_uart_queue, &msg, 0) == pdTRUE) {
+            while (xQueueReceive(params->tcp_to_uart_queue, &msg, 0) == pdTRUE) {
                 if (msg.hdr.kind == MESSAGE_KIND_DATA) {
                     uart_write_bytes(UART_NUM_2, msg.body, msg.hdr.len);
                 } else if (msg.hdr.kind == MESSAGE_KIND_CONFIG) {
@@ -64,8 +64,7 @@ void uart_task(void* pvParamters) {
 
                         int len = uart_read_bytes(UART_NUM_2, msg.body, to_read, 0);
                         if (len > 0) {
-                            // Log the received data for debugging
-                            ESP_LOGI(TAG, "Received %d bytes from UART: %.*s", len, len, msg.body);
+                            ESP_LOGD(TAG, "Received %d bytes from UART", len);
                             msg.hdr.len = len;
                             // Block indefinitely until the TCP task has room for this data
                             xQueueSend(params->uart_to_tcp_queue, &msg, portMAX_DELAY);
