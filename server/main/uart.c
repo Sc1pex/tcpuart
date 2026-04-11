@@ -14,6 +14,12 @@ static const char* TAG = "uart";
 #define UART_PORT CONFIG_ESP_UART_PORT_NUM
 #define UART_EVENT_QUEUE_SIZE 16
 
+#ifdef CONFIG_ESP_UART_RESET_ENABLED
+#define RESET_PIN CONFIG_ESP_UART_RESET_PIN
+#define RESET_ACTIVE_LEVEL (CONFIG_ESP_UART_RESET_ACTIVE_LOW ? 0 : 1)
+#define RESET_INACTIVE_LEVEL (CONFIG_ESP_UART_RESET_ACTIVE_LOW ? 1 : 0)
+#endif
+
 void apply_config(const ConfigMessage* config) {
     ESP_LOGI(
         TAG, "Applying UART config: baud_rate=%u, data_bits=%d, stop_bits=%d, parity=%d",
@@ -68,8 +74,51 @@ void apply_config(const ConfigMessage* config) {
     }
 }
 
+static void handle_control(const ControlMessage* ctrl, UartTaskParams* params) {
+    Message resp_msg;
+    resp_msg.hdr.kind = MESSAGE_KIND_RESPONSE;
+    resp_msg.hdr.len = sizeof(ResponseMessage);
+    ResponseMessage* resp = (ResponseMessage*) resp_msg.body;
+
+    if (ctrl->command == CONTROL_CMD_RESET) {
+#ifdef CONFIG_ESP_UART_RESET_ENABLED
+        ESP_LOGI(TAG, "Performing remote reset on GPIO %d", RESET_PIN);
+        gpio_set_level(RESET_PIN, RESET_ACTIVE_LEVEL);
+        vTaskDelay(pdMS_TO_TICKS(CONFIG_ESP_UART_RESET_DURATION_MS));
+        gpio_set_level(RESET_PIN, RESET_INACTIVE_LEVEL);
+        resp->status = RESPONSE_STATUS_OK;
+#else
+        ESP_LOGW(TAG, "Remote reset command received but feature is disabled");
+        resp->status = RESPONSE_STATUS_NOT_SUPPORTED;
+#endif
+    } else {
+        ESP_LOGW(TAG, "Unknown control command: %d", ctrl->command);
+        resp->status = RESPONSE_STATUS_NOT_SUPPORTED;
+    }
+
+    // Send response back to TCP task
+    if (xQueueSend(params->uart_to_tcp_queue, &resp_msg, portMAX_DELAY) == pdTRUE) {
+        uint64_t val = 1;
+        write(params->uart_to_tcp_efd, &val, sizeof(val));
+    }
+}
+
 void uart_task(void* pvParamters) {
     UartTaskParams* params = (UartTaskParams*) pvParamters;
+
+#ifdef CONFIG_ESP_UART_RESET_ENABLED
+    gpio_config_t reset_gpio_cfg = {
+        .pin_bit_mask = (1ULL << RESET_PIN),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&reset_gpio_cfg));
+    ESP_ERROR_CHECK(gpio_set_level(RESET_PIN, RESET_INACTIVE_LEVEL));
+    ESP_LOGI(TAG, "Reset GPIO %d initialized to level %d", RESET_PIN, RESET_INACTIVE_LEVEL);
+#endif
+
     uart_config_t cfg = {
         .baud_rate = 115200,
         .data_bits = UART_DATA_8_BITS,
@@ -84,9 +133,10 @@ void uart_task(void* pvParamters) {
         uart_driver_install(UART_PORT, 1024, 1024, UART_EVENT_QUEUE_SIZE, &uart_event_queue, 0)
     );
     ESP_ERROR_CHECK(uart_param_config(UART_PORT, &cfg));
-    ESP_ERROR_CHECK(
-        uart_set_pin(UART_PORT, CONFIG_ESP_UART_TX_PIN, CONFIG_ESP_UART_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE)
-    );
+    ESP_ERROR_CHECK(uart_set_pin(
+        UART_PORT, CONFIG_ESP_UART_TX_PIN, CONFIG_ESP_UART_RX_PIN, UART_PIN_NO_CHANGE,
+        UART_PIN_NO_CHANGE
+    ));
 
     QueueSetHandle_t queue_set = xQueueCreateSet(16 + UART_EVENT_QUEUE_SIZE);
     xQueueAddToSet(uart_event_queue, queue_set);
@@ -107,6 +157,13 @@ void uart_task(void* pvParamters) {
                     }
                     ConfigMessage* config = (ConfigMessage*) msg.body;
                     apply_config(config);
+                } else if (msg.hdr.kind == MESSAGE_KIND_CONTROL) {
+                    if (msg.hdr.len != sizeof(ControlMessage)) {
+                        ESP_LOGE(TAG, "invalid control message length: %d", msg.hdr.len);
+                        continue;
+                    }
+                    ControlMessage* ctrl = (ControlMessage*) msg.body;
+                    handle_control(ctrl, params);
                 }
             }
         } else if (active_queue == uart_event_queue) {

@@ -7,6 +7,8 @@
 typedef enum {
     MESSAGE_KIND_DATA = 1,
     MESSAGE_KIND_CONFIG = 2,
+    MESSAGE_KIND_CONTROL = 3,
+    MESSAGE_KIND_RESPONSE = 4,
 } MessageKind;
 
 typedef struct __attribute__((packed)) {
@@ -25,3 +27,17 @@ typedef struct __attribute__((packed)) {
     uint8_t stop_bits;
     uint8_t parity;
 } ConfigMessage;
+
+typedef struct __attribute__((packed)) {
+    uint8_t command;
+} ControlMessage;
+
+typedef struct __attribute__((packed)) {
+    uint8_t status;
+} ResponseMessage;
+
+#define CONTROL_CMD_RESET 1
+
+#define RESPONSE_STATUS_OK 1
+#define RESPONSE_STATUS_NOT_SUPPORTED 2
+

@@ -23,6 +23,34 @@ menu "TcpUart Server Configuration"
         help
             Port number to listen on
 
+    config ESP_UART_RESET_ENABLED
+        bool "Enable Remote Reset Support"
+        default n
+        help
+            If enabled, the ESP32 can trigger a hardware reset on the connected device.
+
+    if ESP_UART_RESET_ENABLED
+        config ESP_UART_RESET_PIN
+            int "Reset GPIO Pin"
+            default 18
+            help
+                GPIO number connected to the target device's Reset pin.
+
+        config ESP_UART_RESET_ACTIVE_LOW
+            bool "Active Low Reset"
+            default y
+            help
+                Check if the target resets when the pin is pulled to GND. 
+                Uncheck for Active High (pull to 3.3V).
+
+        config ESP_UART_RESET_DURATION_MS
+            int "Reset Pulse Duration (ms)"
+            default 100
+            range 1 5000
+            help
+                How long (in milliseconds) to hold the reset signal before releasing it.
+    endif
+
     menu "UART Configuration"
         config ESP_UART_PORT_NUM
             int "UART Port Number (0, 1, or 2)"
