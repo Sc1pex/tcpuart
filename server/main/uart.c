@@ -16,8 +16,14 @@ static const char* TAG = "uart";
 
 #ifdef CONFIG_ESP_UART_RESET_ENABLED
 #define RESET_PIN CONFIG_ESP_UART_RESET_PIN
-#define RESET_ACTIVE_LEVEL (CONFIG_ESP_UART_RESET_ACTIVE_LOW ? 0 : 1)
-#define RESET_INACTIVE_LEVEL (CONFIG_ESP_UART_RESET_ACTIVE_LOW ? 1 : 0)
+
+#ifdef CONFIG_ESP_UART_RESET_ACTIVE_LOW
+#define RESET_ACTIVE_LEVEL 0
+#else
+#define RESET_ACTIVE_LEVEL 1
+#endif
+
+#define RESET_INACTIVE_LEVEL (1 - RESET_ACTIVE_LEVEL)
 #endif
 
 void apply_config(const ConfigMessage* config) {
@@ -96,7 +102,6 @@ static void handle_control(const ControlMessage* ctrl, UartTaskParams* params) {
         resp->status = RESPONSE_STATUS_NOT_SUPPORTED;
     }
 
-    // Send response back to TCP task
     if (xQueueSend(params->uart_to_tcp_queue, &resp_msg, portMAX_DELAY) == pdTRUE) {
         uint64_t val = 1;
         write(params->uart_to_tcp_efd, &val, sizeof(val));
