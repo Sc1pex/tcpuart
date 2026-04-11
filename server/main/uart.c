@@ -1,4 +1,5 @@
 #include "uart.h"
+#include "cc.h"
 #include "driver/gpio.h"
 #include "driver/uart.h"
 #include "esp_log.h"
@@ -11,6 +12,45 @@
 static const char* TAG = "uart";
 
 #define UART_EVENT_QUEUE_SIZE 16
+
+void apply_config(const ConfigMessage* config) {
+    ESP_LOGI(
+        TAG, "Applying UART config: baud_rate=%u, data_bits=%d, stop_bits=%d",
+        ntohl(config->baud_rate), config->data_bits, config->stop_bits
+    );
+    uint32_t baud_rate = ntohl(config->baud_rate);
+    ESP_ERROR_CHECK(uart_set_baudrate(UART_NUM_2, baud_rate));
+
+    switch (config->data_bits) {
+    case 5:
+        ESP_ERROR_CHECK(uart_set_word_length(UART_NUM_2, UART_DATA_5_BITS));
+        break;
+    case 6:
+        ESP_ERROR_CHECK(uart_set_word_length(UART_NUM_2, UART_DATA_6_BITS));
+        break;
+    case 7:
+        ESP_ERROR_CHECK(uart_set_word_length(UART_NUM_2, UART_DATA_7_BITS));
+        break;
+    case 8:
+        ESP_ERROR_CHECK(uart_set_word_length(UART_NUM_2, UART_DATA_8_BITS));
+        break;
+    default:
+        ESP_LOGE(TAG, "invalid data bits: %d", config->data_bits);
+        break;
+    }
+
+    switch (config->stop_bits) {
+    case 1:
+        ESP_ERROR_CHECK(uart_set_stop_bits(UART_NUM_2, UART_STOP_BITS_1));
+        break;
+    case 2:
+        ESP_ERROR_CHECK(uart_set_stop_bits(UART_NUM_2, UART_STOP_BITS_2));
+        break;
+    default:
+        ESP_LOGE(TAG, "invalid stop bits: %d", config->stop_bits);
+        break;
+    }
+}
 
 void uart_task(void* pvParamters) {
     UartTaskParams* params = (UartTaskParams*) pvParamters;
@@ -45,7 +85,12 @@ void uart_task(void* pvParamters) {
                 if (msg.hdr.kind == MESSAGE_KIND_DATA) {
                     uart_write_bytes(UART_NUM_2, msg.body, msg.hdr.len);
                 } else if (msg.hdr.kind == MESSAGE_KIND_CONFIG) {
-                    // TODO: handle config message
+                    if (msg.hdr.len != sizeof(ConfigMessage)) {
+                        ESP_LOGE(TAG, "invalid config message length: %d", msg.hdr.len);
+                        continue;
+                    }
+                    ConfigMessage* config = (ConfigMessage*) msg.body;
+                    apply_config(config);
                 }
             }
         } else if (active_queue == uart_event_queue) {
@@ -64,12 +109,9 @@ void uart_task(void* pvParamters) {
 
                         int len = uart_read_bytes(UART_NUM_2, msg.body, to_read, 0);
                         if (len > 0) {
-                            ESP_LOGD(TAG, "Received %d bytes from UART", len);
                             msg.hdr.len = len;
-                            // Block indefinitely until the TCP task has room for this data
                             xQueueSend(params->uart_to_tcp_queue, &msg, portMAX_DELAY);
 
-                            // Signal the TCP task that data is ready
                             uint64_t val = 1;
                             write(params->uart_to_tcp_efd, &val, sizeof(val));
                         }

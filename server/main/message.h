@@ -20,8 +20,8 @@ typedef struct {
 } Message;
 
 typedef struct __attribute__((packed)) {
-    uint32_t baudrate;
+    uint32_t baud_rate;
     uint8_t data_bits;
     uint8_t stop_bits;
     uint8_t parity;
-} configmessage;
+} ConfigMessage;
