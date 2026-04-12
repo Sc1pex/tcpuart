@@ -3,7 +3,7 @@ use common::{
     ctl::{CtlMessage, CtlMessageDecoder, CtlResponse, CtlResponseEncoder},
     msg::{MessageControlReq, MessageControlRes},
 };
-use connection::ConnectionBuilder;
+use connection::Connection;
 use event::DaemonEvent;
 use futures::{SinkExt, StreamExt};
 use nix::{fcntl::OFlag, pty};
@@ -131,7 +131,7 @@ async fn handle_ctl_message(
                 }
             };
 
-            let cb = ConnectionBuilder::new(
+            let conn = Connection::build_and_spawn(
                 name.clone(),
                 addr,
                 port,
@@ -139,7 +139,6 @@ async fn handle_ctl_message(
                 slave_name.clone(),
                 event_tx,
             );
-            let conn = cb.build_and_spawn();
             state.add(conn);
             CtlResponse::AddOk(slave_name)
         }

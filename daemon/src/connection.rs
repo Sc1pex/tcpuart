@@ -21,23 +21,8 @@ pub struct Connection {
     ctl_res_rx: mpsc::Receiver<MessageControlRes>,
 }
 
-struct ConnectionTaskParams {
-    conn_name: String,
-    master: AsyncPty,
-    tcp: TcpBridge,
-    shutdown_rx: oneshot::Receiver<()>,
-    event_tx: mpsc::Sender<DaemonEvent>,
-    ctl_req_rx: mpsc::Receiver<MessageControlReq>,
-    ctl_res_tx: mpsc::Sender<MessageControlRes>,
-}
-
-pub struct ConnectionBuilder {
-    conn: Connection,
-    task_params: Option<ConnectionTaskParams>,
-}
-
-impl ConnectionBuilder {
-    pub fn new(
+impl Connection {
+    pub fn build_and_spawn(
         name: String,
         addr: u32,
         port: u16,
@@ -50,42 +35,26 @@ impl ConnectionBuilder {
         let (ctl_req_tx, ctl_req_rx) = mpsc::channel(8);
         let (ctl_res_tx, ctl_res_rx) = mpsc::channel(8);
 
-        Self {
-            conn: Connection {
-                name: name.clone(),
-                addr,
-                port,
-                slave_path,
-                shutdown_tx,
-                ctl_req_tx,
-                ctl_res_rx,
-            },
-            task_params: Some(ConnectionTaskParams {
-                conn_name: name,
-                master,
-                shutdown_rx,
-                event_tx,
-                tcp,
-                ctl_req_rx,
-                ctl_res_tx,
-            }),
-        }
-    }
-
-    pub fn build_and_spawn(mut self) -> Connection {
-        let task_params = self
-            .task_params
-            .take()
-            .expect("Task params should be present");
+        let conn = Self {
+            name: name.clone(),
+            addr,
+            port,
+            slave_path,
+            shutdown_tx,
+            ctl_req_tx,
+            ctl_res_rx,
+        };
+        let task_params = ConnectionTaskParams {
+            conn_name: name,
+            master,
+            shutdown_rx,
+            event_tx,
+            tcp,
+            ctl_req_rx,
+            ctl_res_tx,
+        };
         tokio::spawn(conn_task(task_params));
-        self.conn
-    }
-}
-
-impl Connection {
-    pub fn shutdown(self) {
-        // If send errors, it means the task has already shut down, so we can ignore it
-        let _ = self.shutdown_tx.send(());
+        conn
     }
 
     pub async fn send_ctl_msg(&mut self, ctl: MessageControlReq) -> Option<MessageControlRes> {
@@ -94,6 +63,21 @@ impl Connection {
         }
         self.ctl_res_rx.recv().await
     }
+
+    pub fn shutdown(self) {
+        // If send errors, it means the task has already shut down, so we can ignore it
+        let _ = self.shutdown_tx.send(());
+    }
+}
+
+struct ConnectionTaskParams {
+    conn_name: String,
+    master: AsyncPty,
+    tcp: TcpBridge,
+    shutdown_rx: oneshot::Receiver<()>,
+    event_tx: mpsc::Sender<DaemonEvent>,
+    ctl_req_rx: mpsc::Receiver<MessageControlReq>,
+    ctl_res_tx: mpsc::Sender<MessageControlRes>,
 }
 
 async fn conn_task(
