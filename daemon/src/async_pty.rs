@@ -7,9 +7,9 @@ use std::{
     io::{self, IoSliceMut, Write},
     os::fd::{AsRawFd, OwnedFd},
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
-use tokio::io::{unix::AsyncFd, AsyncWrite};
+use tokio::io::{AsyncWrite, unix::AsyncFd};
 
 pub struct AsyncPty {
     inner: AsyncFd<PtyMaster>,
@@ -203,11 +203,11 @@ fn get_termios_change(tio: &termios::Termios) -> TermiosChange {
         _ => 0,
     };
     let parity = if tio.control_flags.contains(termios::ControlFlags::PARENB)
-        && !tio.control_flags.contains(termios::ControlFlags::PARODD)
+        && tio.control_flags.contains(termios::ControlFlags::PARODD)
     {
         1
     } else if tio.control_flags.contains(termios::ControlFlags::PARENB)
-        && tio.control_flags.contains(termios::ControlFlags::PARODD)
+        && !tio.control_flags.contains(termios::ControlFlags::PARODD)
     {
         2
     } else {
