@@ -1,4 +1,4 @@
-use common::msg::{MAX_MESSAGE_LEN, MessageControlRes, MessageDecoder, MessageEncoder};
+use common::msg::{MAX_MESSAGE_LEN, MessageCodec, MessageControlRes};
 use futures::{SinkExt, StreamExt};
 use std::io;
 use tokio::{
@@ -7,7 +7,7 @@ use tokio::{
     select,
     sync::broadcast,
 };
-use tokio_util::codec::{FramedRead, FramedWrite};
+use tokio_util::codec::Framed;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> io::Result<()> {
@@ -34,19 +34,16 @@ async fn main() -> io::Result<()> {
     }
 }
 
-async fn handle_conn(mut conn: TcpStream, mut stdin_rx: broadcast::Receiver<String>) {
-    let (reader, writer) = conn.split();
-    let mut reader = FramedRead::new(reader, MessageDecoder);
-    let mut writer = FramedWrite::new(writer, MessageEncoder);
-
+async fn handle_conn(conn: TcpStream, mut stdin_rx: broadcast::Receiver<String>) {
+    let mut framed = Framed::new(conn, MessageCodec);
     let mut last_ctl_resp_status = MessageControlRes::NotSupported;
 
     loop {
         select! {
             Ok(input) = stdin_rx.recv() => {
-                writer.send(input.as_bytes().into()).await.expect("failed to send data");
+                framed.send(input.as_bytes().into()).await.expect("failed to send data");
             }
-            Some(msg) = reader.next() => {
+            Some(msg) = framed.next() => {
                 match msg {
                     Ok(common::msg::Message::Data(size, data)) => {
                         println!("Received data message: {:?}", String::from_utf8_lossy(&data[..size as usize]));
@@ -62,7 +59,7 @@ async fn handle_conn(mut conn: TcpStream, mut stdin_rx: broadcast::Receiver<Stri
                         } else {
                             MessageControlRes::Ok
                         };
-                        writer.send(common::msg::Message::ControlRes(last_ctl_resp_status)).await.expect("failed to send control response");
+                        framed.send(common::msg::Message::ControlRes(last_ctl_resp_status)).await.expect("failed to send control response");
                     }
                     Ok(common::msg::Message::ControlRes(status)) => {
                         eprintln!("Unexpected message type: ControlRes with status={:?}", status);

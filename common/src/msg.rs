@@ -89,10 +89,9 @@ impl From<&[u8]> for Message {
     }
 }
 
-pub struct MessageEncoder;
-pub struct MessageDecoder;
+pub struct MessageCodec;
 
-impl Encoder<Message> for MessageEncoder {
+impl Encoder<Message> for MessageCodec {
     type Error = io::Error;
 
     fn encode(&mut self, item: Message, dst: &mut BytesMut) -> Result<(), Self::Error> {
@@ -128,7 +127,7 @@ impl Encoder<Message> for MessageEncoder {
     }
 }
 
-impl Decoder for MessageDecoder {
+impl Decoder for MessageCodec {
     type Item = Message;
     type Error = io::Error;
 
@@ -195,26 +194,5 @@ impl Decoder for MessageDecoder {
         let bytes_read = cursor.position() as usize;
         src.advance(bytes_read);
         Ok(Some(item))
-    }
-}
-
-pub struct MessageCodec;
-
-impl Encoder<Message> for MessageCodec {
-    type Error = <MessageEncoder as Encoder<Message>>::Error;
-
-    fn encode(&mut self, item: Message, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let mut encoder = MessageEncoder;
-        encoder.encode(item, dst)
-    }
-}
-
-impl Decoder for MessageCodec {
-    type Item = <MessageDecoder as Decoder>::Item;
-    type Error = <MessageDecoder as Decoder>::Error;
-
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let mut decoder = MessageDecoder;
-        decoder.decode(src)
     }
 }
