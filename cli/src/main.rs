@@ -65,6 +65,7 @@ async fn main() {
 
     if let Err(e) = writer.send(message).await {
         eprintln!("Failed to send message to socket: {e}");
+        return;
     }
 
     match reader.next().await {
