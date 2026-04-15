@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 tokio-util = { workspace = true, features = ["codec"] }
 futures = { workspace = true }
+tracing = {workspace = true }

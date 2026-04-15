@@ -3,6 +3,7 @@ use futures::{SinkExt, StreamExt};
 use std::{io, net::Ipv4Addr, time::Duration};
 use tokio::{net::TcpStream, time::timeout};
 use tokio_util::codec::Framed;
+use tracing::{error, info};
 
 pub struct TcpBridge {
     addr: u32,
@@ -17,6 +18,13 @@ impl TcpBridge {
             port,
             framed: None,
         }
+    }
+
+    pub fn addr(&self) -> Ipv4Addr {
+        Ipv4Addr::from_bits(self.addr)
+    }
+    pub fn port(&self) -> u16 {
+        self.port
     }
 
     pub async fn send(&mut self, msg: Message) -> io::Result<()> {
@@ -57,6 +65,7 @@ impl TcpBridge {
 
 impl TcpBridge {
     async fn try_reconnect(&mut self) -> io::Result<()> {
+        info!("attempting to connect to client");
         self.framed = None;
         const MAX_RECONNECT_TIME: Duration = Duration::from_secs(30);
 
@@ -67,18 +76,17 @@ impl TcpBridge {
                 match TcpStream::connect((Ipv4Addr::from_bits(self.addr), self.port)).await {
                     Ok(sock) => {
                         if let Err(e) = sock.set_nodelay(true) {
-                            eprintln!("Failed to set nodelay on client socket: {e}");
+                            error!(error = %e, "failed to set TCP_NODELAY");
                             return;
                         };
+                        info!("successfully connected to client");
                         self.framed = Some(Framed::new(sock, MessageCodec));
                         return;
                     }
                     Err(e) => {
-                        eprintln!(
-                            "Reconnect failed ({}:{}): {} - retrying in {:?}",
-                            Ipv4Addr::from_bits(self.addr),
-                            self.port,
-                            e,
+                        error!(
+                            error = %e,
+                            "failed to connect to client - retrying in {:?}",
                             backoff
                         );
                         tokio::time::sleep(backoff).await;
@@ -88,6 +96,9 @@ impl TcpBridge {
             }
         })
         .await
-        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "Failed to reconnect after 30s"))
+        .map_err(|_| {
+            error!("failed to connect to client after {:?}", MAX_RECONNECT_TIME);
+            io::Error::new(io::ErrorKind::TimedOut, "Failed to reconnect after 30s")
+        })
     }
 }

@@ -15,6 +15,8 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_util::codec::{FramedRead, FramedWrite};
+use tracing::{error, info, instrument};
+use tracing_subscriber::{EnvFilter, fmt};
 
 mod async_pty;
 mod connection;
@@ -24,6 +26,8 @@ mod tcp_bridge;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    fmt().with_env_filter(EnvFilter::from_default_env()).init();
+
     let socket_path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "./tcpuart.sock".to_string());
@@ -33,6 +37,10 @@ async fn main() {
     let (event_tx, mut event_rx) = mpsc::channel(128);
 
     let listener = UnixListener::bind(&socket_path).expect("Failed to bind to socket");
+    info!(
+        path = socket_path,
+        "daemon started and listening for connections"
+    );
     loop {
         tokio::select! {
             res = listener.accept() => {
@@ -41,7 +49,7 @@ async fn main() {
                         let event_tx = event_tx.clone();
                         tokio::spawn(async move { handle_stream(stream, event_tx).await });
                     }
-                    Err(e) => eprintln!("Accept error: {e}"),
+                    Err(e) => error!(error = %e, "accept failed"),
                 }
             }
             Some(event) = event_rx.recv() => {
@@ -51,6 +59,7 @@ async fn main() {
                         let _ = sender.send(resp);
                     }
                     DaemonEvent::ConnectionClosed(name) => {
+                        info!(name, "connection closed, removing from state");
                         state.remove(&name);
                     }
                 }
@@ -61,7 +70,7 @@ async fn main() {
         }
     }
 
-    println!("Cleaning up socket: {socket_path}");
+    info!(path = socket_path, "cleaning up socket");
     let _ = fs::remove_file(&socket_path);
 }
 
@@ -91,11 +100,15 @@ async fn handle_stream(mut stream: UnixStream, event_tx: mpsc::Sender<DaemonEven
                     .await
                     .expect("Failed to send message to user");
             }
-            Err(e) => eprintln!("Received invalid message: {e}"),
+            Err(e) => {
+                error!(error = %e, "failed to decode message from user");
+                break;
+            }
         }
     }
 }
 
+#[instrument(skip(state, event_tx))]
 async fn handle_ctl_message(
     state: &mut State,
     msg: CtlMessage,
@@ -109,25 +122,43 @@ async fn handle_ctl_message(
 
             let master = match pty::posix_openpt(OFlag::O_RDWR | OFlag::O_NOCTTY) {
                 Ok(master) => master,
-                Err(e) => return CtlResponse::Error(format!("Failed to create pty: {e}")),
+                Err(e) => {
+                    error!(error = %e, "failed to open pty master");
+                    return CtlResponse::Error(format!(
+                        "Failed to create pty. See daemon logs for details"
+                    ));
+                }
             };
             if let Err(e) = pty::grantpt(&master) {
-                return CtlResponse::Error(format!("Failed to grant pty: {e}"));
+                error!(error = %e, "failed to grant pty");
+                return CtlResponse::Error(format!(
+                    "Failed to grant pty. See daemon logs for details"
+                ));
             }
             if let Err(e) = pty::unlockpt(&master) {
-                return CtlResponse::Error(format!("Failed to unlock pty: {e}"));
+                error!(error = %e, "failed to unlock pty");
+                return CtlResponse::Error(format!(
+                    "Failed to unlock pty. See daemon logs for details"
+                ));
             }
 
             let slave_name = match unsafe { pty::ptsname(&master) } {
                 Ok(name) => name,
-                Err(e) => return CtlResponse::Error(format!("Failed to get pts name: {e}")),
+                Err(e) => {
+                    error!(error = %e, "failed to get pts name");
+                    return CtlResponse::Error(format!(
+                        "Failed to get pts name. See daemon logs for details"
+                    ));
+                }
             };
 
             let master = match AsyncPty::new(master) {
                 Ok(master) => master,
                 Err(e) => {
-                    eprintln!("Failed to create async pty: {e}");
-                    return CtlResponse::Error("Something went wrong".into());
+                    error!(error = %e, "failed to create AsyncPty");
+                    return CtlResponse::Error(
+                        "Failed to create AsyncPty. See daemon logs for details".to_string(),
+                    );
                 }
             };
 

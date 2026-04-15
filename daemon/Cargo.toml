@@ -9,3 +9,8 @@ tokio = { workspace = true, features = ["macros", "rt", "net", "sync", "signal",
 tokio-util = { workspace = true, features = ["codec"] }
 futures = { workspace = true }
 nix = { workspace = true, features = ["fs", "ioctl", "term", "uio"] }
+tracing = {workspace = true }
+tracing-subscriber = {workspace = true, features = ["env-filter"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tracing-journald = "0.3"

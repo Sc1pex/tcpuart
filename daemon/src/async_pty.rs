@@ -10,6 +10,7 @@ use std::{
     task::{Context, Poll, ready},
 };
 use tokio::io::{AsyncWrite, unix::AsyncFd};
+use tracing::debug;
 
 pub struct AsyncPty {
     inner: AsyncFd<PtyMaster>,
@@ -98,6 +99,7 @@ impl AsyncPty {
 
                         // Re-assert EXTPROC if it was cleared by the slave app
                         if !new_tio.local_flags.contains(termios::LocalFlags::EXTPROC) {
+                            debug!("EXTPROC was cleared. re-toggling");
                             set_extproc(self.inner.get_ref(), &self.slave_fd)?;
                             // Refresh after setting
                             new_tio = termios::tcgetattr(&self.slave_fd)?;
@@ -105,9 +107,15 @@ impl AsyncPty {
 
                         if check_termios_change(&self.current_tio, &new_tio) {
                             self.current_tio = new_tio;
-                            return Ok(PtyReadResult::TermiosChange(get_termios_change(
-                                &self.current_tio,
-                            )));
+                            let change = get_termios_change(&self.current_tio);
+                            debug!(
+                                baudrate = change.baudrate,
+                                data_bits = change.data_bits,
+                                parity = change.parity,
+                                stop_bits = change.stop_bits,
+                                "detected termios change from pty"
+                            );
+                            return Ok(PtyReadResult::TermiosChange(change));
                         }
                     } else {
                         return Ok(PtyReadResult::ControlMessage(ctrl[0]));

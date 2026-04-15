@@ -8,3 +8,5 @@ common = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "net", "sync", "io-util", "io-std"] }
 tokio-util = { workspace = true, features = ["codec"] }
 futures = { workspace = true }
+tracing = {workspace = true }
+tracing-subscriber = {workspace = true, features = ["env-filter"] }

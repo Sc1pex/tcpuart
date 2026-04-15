@@ -1,6 +1,7 @@
 use std::io;
 use tokio_util::bytes::{Buf, BufMut, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
+use tracing::{error, trace};
 
 pub const MAX_MESSAGE_LEN: usize = 255;
 
@@ -141,6 +142,8 @@ impl Decoder for MessageCodec {
             return Ok(None);
         };
 
+        trace!(kind, data_len, "found message header");
+
         if cursor.remaining() < data_len as usize {
             return Ok(None);
         }
@@ -184,6 +187,7 @@ impl Decoder for MessageCodec {
                 Message::ControlRes(res?)
             }
             _ => {
+                error!(kind, "received unknown message kind");
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "Unknown message kind",
@@ -193,6 +197,7 @@ impl Decoder for MessageCodec {
 
         let bytes_read = cursor.position() as usize;
         src.advance(bytes_read);
+        trace!(?item, "successfully decoded message");
         Ok(Some(item))
     }
 }

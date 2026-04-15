@@ -9,6 +9,7 @@ use tokio::{
     select,
     sync::{mpsc, oneshot},
 };
+use tracing::{error, info, instrument};
 
 pub struct Connection {
     pub name: String,
@@ -80,6 +81,7 @@ struct ConnectionTaskParams {
     ctl_res_tx: mpsc::Sender<MessageControlRes>,
 }
 
+#[instrument(skip(event_tx, master, shutdown_rx, tcp, ctl_req_rx, ctl_res_tx) fields(remote_addr = %tcp.addr(), remote_port = %tcp.port()))]
 async fn conn_task(
     ConnectionTaskParams {
         conn_name,
@@ -96,7 +98,7 @@ async fn conn_task(
     loop {
         select! {
             _ = &mut shutdown_rx => {
-                println!("Shutting down connection task");
+                info!("shutting down connection task");
                 break;
             }
             res = master.read(&mut pty_buf) => {
@@ -118,10 +120,10 @@ async fn conn_task(
                         }
                     }
                     Ok(PtyReadResult::ControlMessage(c)) => {
-                        println!("Received other ctrl message: {c}");
+                        error!(control_message = ?c, "unexpected control message from pty");
                     }
                     Err(e) => {
-                        eprintln!("Failed to read from pty: {e}");
+                        error!(error = %e, "error reading from pty");
                         break;
                     }
                 }
@@ -136,7 +138,7 @@ async fn conn_task(
                                 break;
                             }
                         } else {
-                            eprintln!("Received unexpected message: {msg:?}");
+                            error!(?msg, "unexpected message from tcp bridge");
                         }
                     }
                     Err(_) => {
@@ -157,6 +159,7 @@ async fn conn_task(
         }
     }
 
+    info!("connection task exiting, notifying daemon");
     let _ = event_tx
         .send(DaemonEvent::ConnectionClosed(conn_name))
         .await;

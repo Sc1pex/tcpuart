@@ -8,10 +8,16 @@ use tokio::{
     sync::broadcast,
 };
 use tokio_util::codec::Framed;
+use tracing::{error, info};
+use tracing_subscriber::{EnvFilter, fmt};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> io::Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:15113").await?;
+    fmt().with_env_filter(EnvFilter::from_default_env()).init();
+
+    let addr = "127.0.0.1:15113";
+    let listener = TcpListener::bind(addr).await?;
+    info!(addr, "test server listening");
 
     let (stdin_tx, stdin_rx) = broadcast::channel(128);
 
@@ -28,13 +34,19 @@ async fn main() -> io::Result<()> {
     });
 
     loop {
-        let (conn, _) = listener.accept().await?;
+        let (conn, peer) = listener.accept().await?;
+        info!(?peer, "new connection accepted");
         let stdin_rx = stdin_rx.resubscribe();
-        tokio::spawn(handle_conn(conn, stdin_rx));
+        tokio::spawn(handle_conn(conn, peer, stdin_rx));
     }
 }
 
-async fn handle_conn(conn: TcpStream, mut stdin_rx: broadcast::Receiver<String>) {
+#[tracing::instrument(skip(conn, stdin_rx))]
+async fn handle_conn(
+    conn: TcpStream,
+    peer: std::net::SocketAddr,
+    mut stdin_rx: broadcast::Receiver<String>,
+) {
     let mut framed = Framed::new(conn, MessageCodec);
     let mut last_ctl_resp_status = MessageControlRes::NotSupported;
 
@@ -46,13 +58,13 @@ async fn handle_conn(conn: TcpStream, mut stdin_rx: broadcast::Receiver<String>)
             Some(msg) = framed.next() => {
                 match msg {
                     Ok(common::msg::Message::Data(size, data)) => {
-                        println!("Received data message: {:?}", String::from_utf8_lossy(&data[..size as usize]));
+                        info!(data = ?String::from_utf8_lossy(&data[..size as usize]), "received data message");
                     }
                     Ok(common::msg::Message::Config{ baudrate, data_bits, stop_bits, parity } ) => {
-                        println!("Received config message: baudrate={}, data_bits={}, stop_bits={}, parity={:?}", baudrate, data_bits, stop_bits, parity);
+                        info!(baudrate, data_bits, stop_bits, parity = ?parity, "received config message");
                     }
                     Ok(common::msg::Message::ControlReq(cmd)) => {
-                        println!("Received control request: cmd={:?}", cmd);
+                        info!(?cmd, "received control request");
                         // For testing, we can just toggle the response status
                         last_ctl_resp_status = if last_ctl_resp_status == MessageControlRes::Ok {
                             MessageControlRes::NotSupported
@@ -62,10 +74,10 @@ async fn handle_conn(conn: TcpStream, mut stdin_rx: broadcast::Receiver<String>)
                         framed.send(common::msg::Message::ControlRes(last_ctl_resp_status)).await.expect("failed to send control response");
                     }
                     Ok(common::msg::Message::ControlRes(status)) => {
-                        eprintln!("Unexpected message type: ControlRes with status={:?}", status);
+                        error!(?status, "unexpected ControlRes message from client");
                     }
                     Err(e) => {
-                        println!("Error receiving: {e}");
+                        error!(error = %e, "error receiving from client");
                     }
                 }
             }
