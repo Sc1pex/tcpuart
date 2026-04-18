@@ -1,9 +1,15 @@
 use common::msg::{Message, MessageCodec};
 use futures::{SinkExt, StreamExt};
-use std::{io, net::Ipv4Addr, time::Duration};
-use tokio::{net::TcpStream, time::timeout};
+use std::{io, net::Ipv4Addr};
+use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 use tracing::{error, info};
+
+#[derive(Debug)]
+pub enum TcpBridgeStatus<T> {
+    Disconnected(io::Error),
+    Ok(T),
+}
 
 pub struct TcpBridge {
     addr: u32,
@@ -27,78 +33,63 @@ impl TcpBridge {
         self.port
     }
 
-    pub async fn send(&mut self, msg: Message) -> io::Result<()> {
-        if self.framed.is_none() {
-            self.try_reconnect().await?;
-        }
-        match self.framed.as_mut().unwrap().send(msg).await {
-            Ok(()) => Ok(()),
-            Err(_) => {
+    pub async fn send(&mut self, msg: Message) -> TcpBridgeStatus<()> {
+        let Some(framed) = self.framed.as_mut() else {
+            return TcpBridgeStatus::Disconnected(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "not connected",
+            ));
+        };
+
+        match framed.send(msg).await {
+            Ok(_) => TcpBridgeStatus::Ok(()),
+            Err(e) => {
                 self.framed = None;
-                self.try_reconnect().await?;
-                self.framed.as_mut().unwrap().send(msg).await
+                TcpBridgeStatus::Disconnected(e)
             }
         }
     }
 
-    pub async fn next(&mut self) -> io::Result<Message> {
-        if self.framed.is_none() {
-            self.try_reconnect().await?;
-        }
-        match self.framed.as_mut().unwrap().next().await {
-            Some(Ok(msg)) => Ok(msg),
-            Some(Err(_)) | None => {
+    pub async fn next(&mut self) -> TcpBridgeStatus<Message> {
+        let Some(framed) = self.framed.as_mut() else {
+            return TcpBridgeStatus::Disconnected(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "not connected",
+            ));
+        };
+
+        match framed.next().await {
+            Some(Ok(msg)) => TcpBridgeStatus::Ok(msg),
+            Some(Err(e)) => {
                 self.framed = None;
-                self.try_reconnect().await?;
-                match self.framed.as_mut().unwrap().next().await {
-                    Some(Ok(msg)) => Ok(msg),
-                    Some(Err(e)) => Err(e),
-                    None => Err(io::Error::new(
-                        io::ErrorKind::ConnectionAborted,
-                        "connection closed",
-                    )),
-                }
+                TcpBridgeStatus::Disconnected(e)
+            }
+            None => {
+                self.framed = None;
+                TcpBridgeStatus::Disconnected(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    "client closed connection",
+                ))
             }
         }
     }
-}
 
-impl TcpBridge {
-    async fn try_reconnect(&mut self) -> io::Result<()> {
-        info!("attempting to connect to client");
-        self.framed = None;
-        const MAX_RECONNECT_TIME: Duration = Duration::from_secs(30);
+    pub async fn try_connect(&mut self) -> TcpBridgeStatus<()> {
+        if self.framed.is_some() {
+            return TcpBridgeStatus::Ok(());
+        }
 
-        timeout(MAX_RECONNECT_TIME, async {
-            let mut backoff = Duration::from_millis(50);
-
-            loop {
-                match TcpStream::connect((Ipv4Addr::from_bits(self.addr), self.port)).await {
-                    Ok(sock) => {
-                        if let Err(e) = sock.set_nodelay(true) {
-                            error!(error = %e, "failed to set TCP_NODELAY");
-                            return;
-                        };
-                        info!("successfully connected to client");
-                        self.framed = Some(Framed::new(sock, MessageCodec));
-                        return;
-                    }
-                    Err(e) => {
-                        error!(
-                            error = %e,
-                            "failed to connect to client - retrying in {:?}",
-                            backoff
-                        );
-                        tokio::time::sleep(backoff).await;
-                        backoff *= 2;
-                    }
-                }
+        match TcpStream::connect((Ipv4Addr::from_bits(self.addr), self.port)).await {
+            Ok(sock) => {
+                if let Err(e) = sock.set_nodelay(true) {
+                    error!(error = %e, "failed to set TCP_NODELAY");
+                    return TcpBridgeStatus::Disconnected(e);
+                };
+                info!("successfully connected to client");
+                self.framed = Some(Framed::new(sock, MessageCodec));
+                TcpBridgeStatus::Ok(())
             }
-        })
-        .await
-        .map_err(|_| {
-            error!("failed to connect to client after {:?}", MAX_RECONNECT_TIME);
-            io::Error::new(io::ErrorKind::TimedOut, "Failed to reconnect after 30s")
-        })
+            Err(e) => TcpBridgeStatus::Disconnected(e),
+        }
     }
 }
