@@ -1,4 +1,5 @@
 use async_pty::AsyncPty;
+use clap::Parser;
 use common::{
     ctl::{CtlMessage, CtlMessageDecoder, CtlResponse, CtlResponseEncoder},
     msg::{MessageControlReq, MessageControlRes},
@@ -24,13 +25,20 @@ mod event;
 mod state;
 mod tcp_bridge;
 
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Path to the unix socket
+    #[arg(short, long, default_value = "./tcpuart.sock")]
+    socket: String,
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     fmt().with_env_filter(EnvFilter::from_default_env()).init();
 
-    let socket_path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "./tcpuart.sock".to_string());
+    let args = Args::parse();
+    let socket_path = args.socket;
     let _ = fs::remove_file(&socket_path);
 
     let mut state = State::default();
