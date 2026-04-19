@@ -1,4 +1,4 @@
-use common::msg::{MAX_MESSAGE_LEN, MessageCodec, MessageControlRes};
+use common::msg::{DeviceCodec, DeviceControlResponse, DeviceMessage, MAX_MESSAGE_LEN};
 use futures::{SinkExt, StreamExt};
 use std::io;
 use tokio::{
@@ -47,8 +47,8 @@ async fn handle_conn(
     peer: std::net::SocketAddr,
     mut stdin_rx: broadcast::Receiver<String>,
 ) {
-    let mut framed = Framed::new(conn, MessageCodec);
-    let mut last_ctl_resp_status = MessageControlRes::NotSupported;
+    let mut framed = Framed::new(conn, DeviceCodec);
+    let mut last_ctl_resp_status = DeviceControlResponse::NotSupported;
 
     loop {
         select! {
@@ -57,23 +57,23 @@ async fn handle_conn(
             }
             Some(msg) = framed.next() => {
                 match msg {
-                    Ok(common::msg::Message::Data(size, data)) => {
+                    Ok(DeviceMessage::Data(size, data)) => {
                         info!(data = ?String::from_utf8_lossy(&data[..size as usize]), "received data message");
                     }
-                    Ok(common::msg::Message::Config{ baudrate, data_bits, stop_bits, parity } ) => {
+                    Ok(DeviceMessage::Config{ baudrate, data_bits, stop_bits, parity }) => {
                         info!(baudrate, data_bits, stop_bits, parity = ?parity, "received config message");
                     }
-                    Ok(common::msg::Message::ControlReq(cmd)) => {
+                    Ok(DeviceMessage::ControlReq(cmd)) => {
                         info!(?cmd, "received control request");
                         // For testing, we can just toggle the response status
-                        last_ctl_resp_status = if last_ctl_resp_status == MessageControlRes::Ok {
-                            MessageControlRes::NotSupported
+                        last_ctl_resp_status = if last_ctl_resp_status == DeviceControlResponse::Ok {
+                            DeviceControlResponse::NotSupported
                         } else {
-                            MessageControlRes::Ok
+                            DeviceControlResponse::Ok
                         };
-                        framed.send(common::msg::Message::ControlRes(last_ctl_resp_status)).await.expect("failed to send control response");
+                        framed.send(DeviceMessage::ControlRes(last_ctl_resp_status)).await.expect("failed to send control response");
                     }
-                    Ok(common::msg::Message::ControlRes(status)) => {
+                    Ok(DeviceMessage::ControlRes(status)) => {
                         error!(?status, "unexpected ControlRes message from client");
                     }
                     Err(e) => {

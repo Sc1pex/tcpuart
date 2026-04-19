@@ -3,7 +3,7 @@ use crate::{
     event::DaemonEvent,
     tcp_bridge::{TcpBridge, TcpBridgeStatus},
 };
-use common::msg::{MAX_MESSAGE_LEN, Message, MessageControlReq, MessageControlRes};
+use common::msg::{DeviceControlRequest, DeviceControlResponse, DeviceMessage, MAX_MESSAGE_LEN};
 use std::time::Duration;
 use tokio::{
     io::AsyncWriteExt,
@@ -12,6 +12,20 @@ use tokio::{
 };
 use tracing::{error, info, instrument};
 
+#[derive(Debug, Clone, Copy)]
+pub enum DeviceControlError {
+    /// The device is currently unavailable (disconnected or busy).
+    Unavailable,
+}
+
+/// Internal requests sent from the `Connection` object to the background `conn_task`.
+pub enum ConnectionTaskRequest {
+    HardwareControl(
+        DeviceControlRequest,
+        oneshot::Sender<Result<DeviceControlResponse, DeviceControlError>>,
+    ),
+}
+
 pub struct Connection {
     pub name: String,
     pub addr: u32,
@@ -19,8 +33,7 @@ pub struct Connection {
     pub slave_path: String,
 
     shutdown_tx: oneshot::Sender<()>,
-    ctl_req_tx: mpsc::Sender<MessageControlReq>,
-    ctl_res_rx: mpsc::Receiver<MessageControlRes>,
+    ctl_req_tx: mpsc::Sender<ConnectionTaskRequest>,
 }
 
 impl Connection {
@@ -35,7 +48,6 @@ impl Connection {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let tcp = TcpBridge::new(addr, port);
         let (ctl_req_tx, ctl_req_rx) = mpsc::channel(8);
-        let (ctl_res_tx, ctl_res_rx) = mpsc::channel(8);
 
         let conn = Self {
             name: name.clone(),
@@ -44,7 +56,6 @@ impl Connection {
             slave_path,
             shutdown_tx,
             ctl_req_tx,
-            ctl_res_rx,
         };
 
         let task = ConnectionTask {
@@ -54,23 +65,32 @@ impl Connection {
             event_tx,
             tcp,
             ctl_req_rx,
-            ctl_res_tx,
             pty_buf: [0; MAX_MESSAGE_LEN],
             state: ConnState::Reconnecting {
                 backoff: INITIAL_RECONNECT_BACKOFF,
                 pending: None,
             },
+            pending_hw_ctl: None,
         };
         tokio::spawn(conn_task(task));
 
         conn
     }
 
-    pub async fn send_ctl_msg(&mut self, ctl: MessageControlReq) -> Option<MessageControlRes> {
-        if self.ctl_req_tx.send(ctl).await.is_err() {
+    pub async fn send_hardware_ctl(
+        &mut self,
+        ctl: DeviceControlRequest,
+    ) -> Option<Result<DeviceControlResponse, DeviceControlError>> {
+        let (tx, rx) = oneshot::channel();
+        if self
+            .ctl_req_tx
+            .send(ConnectionTaskRequest::HardwareControl(ctl, tx))
+            .await
+            .is_err()
+        {
             return None;
         }
-        self.ctl_res_rx.recv().await
+        rx.await.ok()
     }
 
     pub fn shutdown(self) {
@@ -83,10 +103,10 @@ enum ConnState {
     Connected,
     Reconnecting {
         backoff: Duration,
-        pending: Option<Message>,
+        pending: Option<DeviceMessage>,
     },
     Resyncing {
-        pending: Message,
+        pending: DeviceMessage,
     },
     ShuttingDown,
 }
@@ -97,10 +117,11 @@ struct ConnectionTask {
     tcp: TcpBridge,
     shutdown_rx: oneshot::Receiver<()>,
     event_tx: mpsc::Sender<DaemonEvent>,
-    ctl_req_rx: mpsc::Receiver<MessageControlReq>,
-    ctl_res_tx: mpsc::Sender<MessageControlRes>,
+    ctl_req_rx: mpsc::Receiver<ConnectionTaskRequest>,
     state: ConnState,
     pty_buf: [u8; MAX_MESSAGE_LEN],
+
+    pending_hw_ctl: Option<oneshot::Sender<Result<DeviceControlResponse, DeviceControlError>>>,
 }
 
 #[allow(dead_code)]
@@ -124,10 +145,11 @@ impl ConnectionTask {
                 info!("shutting down connection task");
                 Some(ConnState::ShuttingDown)
             }
+
             res = self.master.read(&mut self.pty_buf) => {
                 match res {
                     Ok(PtyReadResult::TermiosChange(c)) => {
-                        let msg = Message::Config {
+                        let msg = DeviceMessage::Config {
                             baudrate: c.baudrate,
                             data_bits: c.data_bits,
                             stop_bits: c.stop_bits,
@@ -138,6 +160,7 @@ impl ConnectionTask {
                             TcpBridgeStatus::Disconnected(e) => {
                                 let backoff = INITIAL_RECONNECT_BACKOFF;
                                 error!(error = %e, "connection lost, retrying in {:?}", backoff);
+                                self.fail_pending_ctl();
                                 Some(ConnState::Reconnecting {
                                     backoff,
                                     pending: Some(msg),
@@ -145,13 +168,15 @@ impl ConnectionTask {
                             }
                         }
                     }
+
                     Ok(PtyReadResult::Data(n)) => {
-                        let msg: Message = self.pty_buf[..n].into();
+                        let msg: DeviceMessage = self.pty_buf[..n].into();
                         match self.tcp.send(msg).await {
                             TcpBridgeStatus::Ok(()) => None,
                             TcpBridgeStatus::Disconnected(e) => {
                                 let backoff = INITIAL_RECONNECT_BACKOFF;
                                 error!(error = %e, "connection lost, retrying in {:?}", backoff);
+                                self.fail_pending_ctl();
                                 Some(ConnState::Reconnecting {
                                     backoff,
                                     pending: Some(msg),
@@ -159,38 +184,47 @@ impl ConnectionTask {
                             }
                         }
                     }
+
                     Ok(PtyReadResult::ControlMessage(c)) => {
                         error!(control_message = ?c, "unexpected control message from pty");
                         None
                     }
+
                     Err(e) => {
                         error!(error = %e, "error reading from pty");
                         Some(ConnState::ShuttingDown)
                     }
                 }
             }
+
             msg = self.tcp.next() => {
                 match msg {
                     TcpBridgeStatus::Ok(msg) => {
                         match msg {
-                            Message::Data(size, data) => {
+                            DeviceMessage::Data(size, data) => {
                                 if let Err(e) = self.master.write_all(&data[..size as usize]).await {
                                     error!(error = %e, "failed to write data to pty");
                                     return Some(ConnState::ShuttingDown);
                                 }
                             }
-                            Message::ControlRes(resp) => {
-                                if self.ctl_res_tx.send(resp).await.is_err() {
-                                    return Some(ConnState::ShuttingDown);
+
+                            DeviceMessage::ControlRes(resp) => {
+                                if let Some(tx) = self.pending_hw_ctl.take() {
+                                    let _ = tx.send(Ok(resp));
+                                } else {
+                                    error!(?resp, "received unsolicited control response from hardware");
                                 }
                             }
+
                             _ => error!(?msg, "unexpected message from tcp bridge"),
                         }
                         None
                     }
+
                     TcpBridgeStatus::Disconnected(e) => {
                         let backoff = INITIAL_RECONNECT_BACKOFF;
                         error!(error = %e, "connection lost, retrying in {:?}", backoff);
+                        self.fail_pending_ctl();
                         Some(ConnState::Reconnecting {
                             backoff,
                             pending: None,
@@ -198,26 +232,34 @@ impl ConnectionTask {
                     },
                 }
             }
-            ctl_msg = self.ctl_req_rx.recv() => {
-                let Some(ctl_msg) = ctl_msg else {
-                    return Some(ConnState::ShuttingDown);
-                };
 
-                let msg = Message::ControlReq(ctl_msg);
-                match self.tcp.send(msg).await {
-                    TcpBridgeStatus::Ok(()) => None,
-                    TcpBridgeStatus::Disconnected(e) => {
-                        let backoff = INITIAL_RECONNECT_BACKOFF;
-                        error!(error = %e, "connection lost, retrying in {:?}", backoff);
-                        if self.ctl_res_tx.send(MessageControlRes::NotSupported).await.is_err() {
-                            Some(ConnState::ShuttingDown)
-                        } else {
-                            Some(ConnState::Reconnecting {
-                                backoff,
-                                pending: None,
-                            })
+            req = self.ctl_req_rx.recv() => {
+                match req {
+                    Some(ConnectionTaskRequest::HardwareControl(ctl, tx)) => {
+                        if self.pending_hw_ctl.is_some() {
+                             let _ = tx.send(Err(DeviceControlError::Unavailable));
+                             return None;
+                        }
+
+                        let msg = DeviceMessage::ControlReq(ctl);
+                        match self.tcp.send(msg).await {
+                            TcpBridgeStatus::Ok(()) => {
+                                self.pending_hw_ctl = Some(tx);
+                                None
+                            }
+                            TcpBridgeStatus::Disconnected(e) => {
+                                let backoff = INITIAL_RECONNECT_BACKOFF;
+                                error!(error = %e, "connection lost, retrying in {:?}", backoff);
+                                let _ = tx.send(Err(DeviceControlError::Unavailable));
+                                Some(ConnState::Reconnecting {
+                                    backoff,
+                                    pending: None,
+                                })
+                            }
                         }
                     }
+
+                    None => Some(ConnState::ShuttingDown),
                 }
             }
         }
@@ -238,15 +280,16 @@ impl ConnectionTask {
                     info!("shutting down connection task");
                     return Some(ConnState::ShuttingDown)
                 }
-                ctl_msg = self.ctl_req_rx.recv() => {
-                    let Some(_) = ctl_msg else {
-                        return Some(ConnState::ShuttingDown);
-                    };
 
-                    if self.ctl_res_tx.send(MessageControlRes::NotSupported).await.is_err() {
-                        return Some(ConnState::ShuttingDown);
+                req = self.ctl_req_rx.recv() => {
+                    match req {
+                        Some(ConnectionTaskRequest::HardwareControl(_, tx)) => {
+                            let _ = tx.send(Err(DeviceControlError::Unavailable));
+                        }
+                        None => return Some(ConnState::ShuttingDown),
                     }
                 }
+
                 _ = &mut reconnect_sleep => break,
             }
         }
@@ -259,6 +302,7 @@ impl ConnectionTask {
                     Some(ConnState::Connected)
                 }
             }
+
             TcpBridgeStatus::Disconnected(e) => {
                 let next_backoff = Self::next_backoff(backoff);
                 error!(error = %e, "reconnect failed, retrying in {:?}", next_backoff);
@@ -285,15 +329,16 @@ impl ConnectionTask {
                     info!("shutting down connection task");
                     return Some(ConnState::ShuttingDown)
                 }
-                ctl_msg = self.ctl_req_rx.recv() => {
-                    let Some(_) = ctl_msg else {
-                        return Some(ConnState::ShuttingDown);
-                    };
 
-                    if self.ctl_res_tx.send(MessageControlRes::NotSupported).await.is_err() {
-                        return Some(ConnState::ShuttingDown);
+                req = self.ctl_req_rx.recv() => {
+                    match req {
+                        Some(ConnectionTaskRequest::HardwareControl(_, tx)) => {
+                            let _ = tx.send(Err(DeviceControlError::Unavailable));
+                        }
+                        None => return Some(ConnState::ShuttingDown),
                     }
                 }
+
                 send_status = &mut send_pending => {
                     return match send_status {
                         TcpBridgeStatus::Ok(()) => Some(ConnState::Connected),
@@ -313,6 +358,7 @@ impl ConnectionTask {
 
     async fn shutdown(&mut self) {
         info!("connection task exiting, notifying daemon");
+        self.fail_pending_ctl();
         let _ = self
             .event_tx
             .send(DaemonEvent::ConnectionClosed(self.conn_name.clone()))
@@ -325,6 +371,12 @@ impl ConnectionTask {
 
     fn next_backoff(backoff: Duration) -> Duration {
         (backoff * 2).min(MAX_RECONNECT_BACKOFF)
+    }
+
+    fn fail_pending_ctl(&mut self) {
+        if let Some(tx) = self.pending_hw_ctl.take() {
+            let _ = tx.send(Err(DeviceControlError::Unavailable));
+        }
     }
 }
 

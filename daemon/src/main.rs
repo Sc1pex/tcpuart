@@ -1,8 +1,8 @@
 use async_pty::AsyncPty;
 use clap::Parser;
 use common::{
-    ctl::{CtlMessage, CtlMessageDecoder, CtlResponse, CtlResponseEncoder},
-    msg::{MessageControlReq, MessageControlRes},
+    ctl::{DaemonRequest, DaemonRequestDecoder, DaemonResponse, DaemonResponseEncoder},
+    msg::{DeviceControlRequest, DeviceControlResponse},
 };
 use connection::Connection;
 use event::DaemonEvent;
@@ -63,7 +63,7 @@ async fn main() {
             Some(event) = event_rx.recv() => {
                 match event {
                     DaemonEvent::CliCommand(ctl_message, sender) => {
-                        let resp = handle_ctl_message(&mut state, ctl_message, event_tx.clone()).await;
+                        let resp = handle_daemon_request(&mut state, ctl_message, event_tx.clone()).await;
                         let _ = sender.send(resp);
                     }
                     DaemonEvent::ConnectionClosed(name) => {
@@ -82,10 +82,10 @@ async fn main() {
     let _ = fs::remove_file(&socket_path);
 }
 
-async fn handle_stream(mut stream: UnixStream, event_tx: mpsc::Sender<DaemonEvent>) {
-    let (reader, writer) = stream.split();
-    let mut reader = FramedRead::new(reader, CtlMessageDecoder);
-    let mut writer = FramedWrite::new(writer, CtlResponseEncoder);
+async fn handle_stream(stream: UnixStream, event_tx: mpsc::Sender<DaemonEvent>) {
+    let (reader, writer) = stream.into_split();
+    let mut reader = FramedRead::new(reader, DaemonRequestDecoder);
+    let mut writer = FramedWrite::new(writer, DaemonResponseEncoder);
 
     while let Some(msg) = reader.next().await {
         match msg {
@@ -101,7 +101,7 @@ async fn handle_stream(mut stream: UnixStream, event_tx: mpsc::Sender<DaemonEven
                 }
                 let resp = match rx.await {
                     Ok(resp) => resp,
-                    Err(_) => CtlResponse::Error("Something went wrong".to_string()),
+                    Err(_) => DaemonResponse::Error("Something went wrong".to_string()),
                 };
                 writer
                     .send(resp)
@@ -117,35 +117,37 @@ async fn handle_stream(mut stream: UnixStream, event_tx: mpsc::Sender<DaemonEven
 }
 
 #[instrument(skip(state, event_tx))]
-async fn handle_ctl_message(
+async fn handle_daemon_request(
     state: &mut State,
-    msg: CtlMessage,
+    msg: DaemonRequest,
     event_tx: mpsc::Sender<DaemonEvent>,
-) -> CtlResponse {
+) -> DaemonResponse {
     match msg {
-        CtlMessage::Add { name, addr, port } => {
+        DaemonRequest::Add { name, addr, port } => {
             if state.exists(&name) {
-                return CtlResponse::Error(format!("Connection with name '{name}' already exists"));
+                return DaemonResponse::Error(format!(
+                    "Connection with name '{name}' already exists"
+                ));
             }
 
             let master = match pty::posix_openpt(OFlag::O_RDWR | OFlag::O_NOCTTY) {
                 Ok(master) => master,
                 Err(e) => {
                     error!(error = %e, "failed to open pty master");
-                    return CtlResponse::Error(format!(
+                    return DaemonResponse::Error(format!(
                         "Failed to create pty. See daemon logs for details"
                     ));
                 }
             };
             if let Err(e) = pty::grantpt(&master) {
                 error!(error = %e, "failed to grant pty");
-                return CtlResponse::Error(format!(
+                return DaemonResponse::Error(format!(
                     "Failed to grant pty. See daemon logs for details"
                 ));
             }
             if let Err(e) = pty::unlockpt(&master) {
                 error!(error = %e, "failed to unlock pty");
-                return CtlResponse::Error(format!(
+                return DaemonResponse::Error(format!(
                     "Failed to unlock pty. See daemon logs for details"
                 ));
             }
@@ -154,7 +156,7 @@ async fn handle_ctl_message(
                 Ok(name) => name,
                 Err(e) => {
                     error!(error = %e, "failed to get pts name");
-                    return CtlResponse::Error(format!(
+                    return DaemonResponse::Error(format!(
                         "Failed to get pts name. See daemon logs for details"
                     ));
                 }
@@ -164,7 +166,7 @@ async fn handle_ctl_message(
                 Ok(master) => master,
                 Err(e) => {
                     error!(error = %e, "failed to create AsyncPty");
-                    return CtlResponse::Error(
+                    return DaemonResponse::Error(
                         "Failed to create AsyncPty. See daemon logs for details".to_string(),
                     );
                 }
@@ -179,25 +181,33 @@ async fn handle_ctl_message(
                 event_tx,
             );
             state.add(conn);
-            CtlResponse::AddOk(slave_name)
+            DaemonResponse::AddOk(slave_name)
         }
-        CtlMessage::Remove { name } => {
+        DaemonRequest::Remove { name } => {
             if state.remove(&name) {
-                CtlResponse::RemoveOk
+                DaemonResponse::RemoveOk
             } else {
-                CtlResponse::Error(format!("No connection found with name: {name}"))
+                DaemonResponse::Error(format!("No connection found with name: {name}"))
             }
         }
-        CtlMessage::List => CtlResponse::List(state.list()),
-        CtlMessage::Reset { name } => {
-            match state.send_ctl_msg(&name, MessageControlReq::Reset).await {
-                Some(resp) => match resp {
-                    MessageControlRes::Ok => CtlResponse::ResetOk,
-                    MessageControlRes::NotSupported => CtlResponse::Error(format!(
-                        "Connection '{name}' does not support reset command"
+        DaemonRequest::List => DaemonResponse::List(state.list()),
+        DaemonRequest::Reset { name } => {
+            match state
+                .send_hardware_ctl(&name, DeviceControlRequest::Reset)
+                .await
+            {
+                Some(res) => match res {
+                    Ok(resp) => match resp {
+                        DeviceControlResponse::Ok => DaemonResponse::ResetOk,
+                        DeviceControlResponse::NotSupported => DaemonResponse::Error(format!(
+                            "Connection '{name}' does not support reset command"
+                        )),
+                    },
+                    Err(_) => DaemonResponse::Error(format!(
+                        "Connection '{name}' is currently unavailable (offline or busy)"
                     )),
                 },
-                None => CtlResponse::Error(format!("No connection found with name: {name}")),
+                None => DaemonResponse::Error(format!("No connection found with name: {name}")),
             }
         }
     }

@@ -4,8 +4,9 @@ use tokio_util::{
     codec::{Decoder, Encoder},
 };
 
+/// Commands sent from the CLI to the Daemon over the Unix domain socket
 #[derive(Debug)]
-pub enum CtlMessage {
+pub enum DaemonRequest {
     Add { name: String, addr: u32, port: u16 },
     Remove { name: String },
     List,
@@ -19,7 +20,8 @@ pub struct ConnectionInfo {
     pub pts_path: String,
 }
 
-pub enum CtlResponse {
+/// Responses sent from the Daemon back to the CLI
+pub enum DaemonResponse {
     AddOk(String),
     RemoveOk,
     List(Vec<ConnectionInfo>),
@@ -27,51 +29,51 @@ pub enum CtlResponse {
     Error(String),
 }
 
-impl CtlMessage {
+impl DaemonRequest {
     pub fn msg_type(&self) -> u8 {
         match self {
-            CtlMessage::Add { .. } => 1,
-            CtlMessage::Remove { .. } => 2,
-            CtlMessage::List => 3,
-            CtlMessage::Reset { .. } => 4,
+            DaemonRequest::Add { .. } => 1,
+            DaemonRequest::Remove { .. } => 2,
+            DaemonRequest::List => 3,
+            DaemonRequest::Reset { .. } => 4,
         }
     }
 }
 
-impl CtlResponse {
+impl DaemonResponse {
     pub fn msg_type(&self) -> u8 {
         match self {
-            CtlResponse::AddOk(_) => 1,
-            CtlResponse::RemoveOk => 2,
-            CtlResponse::List(_) => 3,
-            CtlResponse::ResetOk => 4,
-            CtlResponse::Error(_) => 255,
+            DaemonResponse::AddOk(_) => 1,
+            DaemonResponse::RemoveOk => 2,
+            DaemonResponse::List(_) => 3,
+            DaemonResponse::ResetOk => 4,
+            DaemonResponse::Error(_) => 255,
         }
     }
 }
 
-pub struct CtlMessageEncoder;
-pub struct CtlMessageDecoder;
-pub struct CtlResponseEncoder;
-pub struct CtlResponseDecoder;
+pub struct DaemonRequestEncoder;
+pub struct DaemonRequestDecoder;
+pub struct DaemonResponseEncoder;
+pub struct DaemonResponseDecoder;
 
-impl Encoder<CtlMessage> for CtlMessageEncoder {
+impl Encoder<DaemonRequest> for DaemonRequestEncoder {
     type Error = io::Error;
 
-    fn encode(&mut self, item: CtlMessage, dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: DaemonRequest, dst: &mut BytesMut) -> Result<(), Self::Error> {
         dst.put_u8(item.msg_type());
 
         match item {
-            CtlMessage::Add { name, addr, port } => {
+            DaemonRequest::Add { name, addr, port } => {
                 encode_str(&name, dst)?;
                 dst.put_u32(addr);
                 dst.put_u16(port);
             }
-            CtlMessage::Remove { name } => {
+            DaemonRequest::Remove { name } => {
                 encode_str(&name, dst)?;
             }
-            CtlMessage::List => {}
-            CtlMessage::Reset { name } => {
+            DaemonRequest::List => {}
+            DaemonRequest::Reset { name } => {
                 encode_str(&name, dst)?;
             }
         }
@@ -79,8 +81,8 @@ impl Encoder<CtlMessage> for CtlMessageEncoder {
     }
 }
 
-impl Decoder for CtlMessageDecoder {
-    type Item = CtlMessage;
+impl Decoder for DaemonRequestDecoder {
+    type Item = DaemonRequest;
     type Error = io::Error;
 
     fn decode(
@@ -104,20 +106,20 @@ impl Decoder for CtlMessageDecoder {
                 let Ok(port) = cursor.try_get_u16() else {
                     return Ok(None);
                 };
-                CtlMessage::Add { name, addr, port }
+                DaemonRequest::Add { name, addr, port }
             }
             2 => {
                 let Some(name) = decode_str(&mut cursor)? else {
                     return Ok(None);
                 };
-                CtlMessage::Remove { name }
+                DaemonRequest::Remove { name }
             }
-            3 => CtlMessage::List,
+            3 => DaemonRequest::List,
             4 => {
                 let Some(name) = decode_str(&mut cursor)? else {
                     return Ok(None);
                 };
-                CtlMessage::Reset { name }
+                DaemonRequest::Reset { name }
             }
             _ => {
                 return Err(io::Error::new(
@@ -134,21 +136,21 @@ impl Decoder for CtlMessageDecoder {
     }
 }
 
-impl Encoder<CtlResponse> for CtlResponseEncoder {
+impl Encoder<DaemonResponse> for DaemonResponseEncoder {
     type Error = io::Error;
 
     fn encode(
         &mut self,
-        item: CtlResponse,
+        item: DaemonResponse,
         dst: &mut tokio_util::bytes::BytesMut,
     ) -> Result<(), Self::Error> {
         dst.put_u8(item.msg_type());
         match item {
-            CtlResponse::AddOk(pts_path) => {
+            DaemonResponse::AddOk(pts_path) => {
                 encode_str(&pts_path, dst)?;
             }
-            CtlResponse::RemoveOk => {}
-            CtlResponse::List(connections) => {
+            DaemonResponse::RemoveOk => {}
+            DaemonResponse::List(connections) => {
                 dst.put_u16(connections.len() as u16);
                 for conn in connections {
                     encode_str(&conn.name, dst)?;
@@ -157,8 +159,8 @@ impl Encoder<CtlResponse> for CtlResponseEncoder {
                     encode_str(&conn.pts_path, dst)?;
                 }
             }
-            CtlResponse::ResetOk => {}
-            CtlResponse::Error(msg) => {
+            DaemonResponse::ResetOk => {}
+            DaemonResponse::Error(msg) => {
                 encode_str(&msg, dst)?;
             }
         }
@@ -166,8 +168,8 @@ impl Encoder<CtlResponse> for CtlResponseEncoder {
     }
 }
 
-impl Decoder for CtlResponseDecoder {
-    type Item = CtlResponse;
+impl Decoder for DaemonResponseDecoder {
+    type Item = DaemonResponse;
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -182,9 +184,9 @@ impl Decoder for CtlResponseDecoder {
                 let Some(pts_path) = decode_str(&mut cursor)? else {
                     return Ok(None);
                 };
-                CtlResponse::AddOk(pts_path)
+                DaemonResponse::AddOk(pts_path)
             }
-            2 => CtlResponse::RemoveOk,
+            2 => DaemonResponse::RemoveOk,
             3 => {
                 let Ok(count) = cursor.try_get_u16() else {
                     return Ok(None);
@@ -210,14 +212,14 @@ impl Decoder for CtlResponseDecoder {
                         pts_path,
                     });
                 }
-                CtlResponse::List(connections)
+                DaemonResponse::List(connections)
             }
-            4 => CtlResponse::ResetOk,
+            4 => DaemonResponse::ResetOk,
             255 => {
                 let Some(msg) = decode_str(&mut cursor)? else {
                     return Ok(None);
                 };
-                CtlResponse::Error(msg)
+                DaemonResponse::Error(msg)
             }
             _ => {
                 return Err(io::Error::new(

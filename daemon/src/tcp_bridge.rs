@@ -1,6 +1,7 @@
-use common::msg::{Message, MessageCodec};
+use common::msg::{DeviceCodec, DeviceMessage};
 use futures::{SinkExt, StreamExt};
-use std::{io, net::Ipv4Addr};
+use std::io;
+use std::net::Ipv4Addr;
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 use tracing::{error, info};
@@ -14,7 +15,7 @@ pub enum TcpBridgeStatus<T> {
 pub struct TcpBridge {
     addr: u32,
     port: u16,
-    framed: Option<Framed<TcpStream, MessageCodec>>,
+    framed: Option<Framed<TcpStream, DeviceCodec>>,
 }
 
 impl TcpBridge {
@@ -33,7 +34,7 @@ impl TcpBridge {
         self.port
     }
 
-    pub async fn send(&mut self, msg: Message) -> TcpBridgeStatus<()> {
+    pub async fn send(&mut self, msg: DeviceMessage) -> TcpBridgeStatus<()> {
         let Some(framed) = self.framed.as_mut() else {
             return TcpBridgeStatus::Disconnected(io::Error::new(
                 io::ErrorKind::NotConnected,
@@ -50,7 +51,7 @@ impl TcpBridge {
         }
     }
 
-    pub async fn next(&mut self) -> TcpBridgeStatus<Message> {
+    pub async fn next(&mut self) -> TcpBridgeStatus<DeviceMessage> {
         let Some(framed) = self.framed.as_mut() else {
             return TcpBridgeStatus::Disconnected(io::Error::new(
                 io::ErrorKind::NotConnected,
@@ -86,7 +87,7 @@ impl TcpBridge {
                     return TcpBridgeStatus::Disconnected(e);
                 };
                 info!("successfully connected to client");
-                self.framed = Some(Framed::new(sock, MessageCodec));
+                self.framed = Some(Framed::new(sock, DeviceCodec));
                 TcpBridgeStatus::Ok(())
             }
             Err(e) => TcpBridgeStatus::Disconnected(e),

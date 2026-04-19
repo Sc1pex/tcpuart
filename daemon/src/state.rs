@@ -1,7 +1,7 @@
-use crate::connection::Connection;
+use crate::connection::{Connection, DeviceControlError};
 use common::{
     ctl::ConnectionInfo,
-    msg::{MessageControlReq, MessageControlRes},
+    msg::{DeviceControlRequest, DeviceControlResponse},
 };
 
 #[derive(Default)]
@@ -36,13 +36,13 @@ impl State {
             .collect()
     }
 
-    pub async fn send_ctl_msg(
+    pub async fn send_hardware_ctl(
         &mut self,
         conn_name: &str,
-        ctl: MessageControlReq,
-    ) -> Option<MessageControlRes> {
+        ctl: DeviceControlRequest,
+    ) -> Option<Result<DeviceControlResponse, DeviceControlError>> {
         let conn = self.conns.iter_mut().find(|c| c.name == conn_name)?;
-        conn.send_ctl_msg(ctl).await
+        conn.send_hardware_ctl(ctl).await
     }
 
     pub fn exists(&self, name: &str) -> bool {

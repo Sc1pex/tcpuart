@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use common::ctl::{CtlMessage, CtlMessageEncoder, CtlResponse, CtlResponseDecoder};
+use common::ctl::{DaemonRequest, DaemonRequestEncoder, DaemonResponse, DaemonResponseDecoder};
 use futures::{SinkExt, StreamExt};
 use std::net::Ipv4Addr;
 use tokio::net::UnixStream;
@@ -35,16 +35,16 @@ enum Command {
 async fn main() {
     let cli = Cli::parse();
 
-    let mut conn = match UnixStream::connect(cli.socket).await {
+    let conn = match UnixStream::connect(cli.socket).await {
         Ok(conn) => conn,
         Err(e) => {
             eprintln!("Failed to connect to socket: {e}");
             return;
         }
     };
-    let (reader, writer) = conn.split();
-    let mut writer = FramedWrite::new(writer, CtlMessageEncoder);
-    let mut reader = FramedRead::new(reader, CtlResponseDecoder);
+    let (reader, writer) = conn.into_split();
+    let mut writer = FramedWrite::new(writer, DaemonRequestEncoder);
+    let mut reader = FramedRead::new(reader, DaemonResponseDecoder);
 
     let message = match cli.command {
         Command::Add { name, addr, port } => {
@@ -52,15 +52,15 @@ async fn main() {
                 eprintln!("Invalid IP address: {addr}");
                 std::process::exit(1);
             });
-            CtlMessage::Add {
+            DaemonRequest::Add {
                 name,
                 addr: u32::from(addr),
                 port,
             }
         }
-        Command::Remove { name } => CtlMessage::Remove { name },
-        Command::List => CtlMessage::List,
-        Command::Reset { name } => CtlMessage::Reset { name },
+        Command::Remove { name } => DaemonRequest::Remove { name },
+        Command::List => DaemonRequest::List,
+        Command::Reset { name } => DaemonRequest::Reset { name },
     };
 
     if let Err(e) = writer.send(message).await {
@@ -75,18 +75,18 @@ async fn main() {
     }
 }
 
-fn handle_response(resp: CtlResponse) {
+fn handle_response(resp: DaemonResponse) {
     match resp {
-        CtlResponse::AddOk(pts_path) => {
+        DaemonResponse::AddOk(pts_path) => {
             println!("Successfully added connection. PTY device: {pts_path}");
         }
-        CtlResponse::Error(msg) => {
+        DaemonResponse::Error(msg) => {
             eprintln!("Error from daemon: {msg}");
         }
-        CtlResponse::RemoveOk => {
+        DaemonResponse::RemoveOk => {
             println!("Successfully removed connection");
         }
-        CtlResponse::List(l) => {
+        DaemonResponse::List(l) => {
             if l.is_empty() {
                 println!("No active connections");
             } else {
@@ -100,7 +100,7 @@ fn handle_response(resp: CtlResponse) {
                 }
             }
         }
-        CtlResponse::ResetOk => {
+        DaemonResponse::ResetOk => {
             println!("Successfully reset device");
         }
     }

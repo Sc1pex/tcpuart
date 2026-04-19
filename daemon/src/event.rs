@@ -1,7 +1,7 @@
-use common::ctl::{CtlMessage, CtlResponse};
+use common::ctl::{DaemonRequest, DaemonResponse};
 use tokio::sync::oneshot;
 
 pub enum DaemonEvent {
-    CliCommand(CtlMessage, oneshot::Sender<CtlResponse>),
+    CliCommand(DaemonRequest, oneshot::Sender<DaemonResponse>),
     ConnectionClosed(String),
 }
