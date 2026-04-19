@@ -24,16 +24,18 @@ impl State {
         true
     }
 
-    pub fn list(&self) -> Vec<ConnectionInfo> {
-        self.conns
-            .iter()
-            .map(|c| ConnectionInfo {
+    pub async fn list(&self) -> Vec<ConnectionInfo> {
+        let mut list = Vec::with_capacity(self.conns.len());
+        for c in &self.conns {
+            list.push(ConnectionInfo {
                 name: c.name.clone(),
                 addr: c.addr,
                 port: c.port,
                 pts_path: c.slave_path.clone(),
-            })
-            .collect()
+                connected: c.get_status().await,
+            });
+        }
+        list
     }
 
     pub async fn send_hardware_ctl(

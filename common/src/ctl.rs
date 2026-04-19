@@ -18,6 +18,7 @@ pub struct ConnectionInfo {
     pub addr: u32,
     pub port: u16,
     pub pts_path: String,
+    pub connected: bool,
 }
 
 /// Responses sent from the Daemon back to the CLI
@@ -157,6 +158,7 @@ impl Encoder<DaemonResponse> for DaemonResponseEncoder {
                     dst.put_u32(conn.addr);
                     dst.put_u16(conn.port);
                     encode_str(&conn.pts_path, dst)?;
+                    dst.put_u8(conn.connected as u8);
                 }
             }
             DaemonResponse::ResetOk => {}
@@ -205,11 +207,24 @@ impl Decoder for DaemonResponseDecoder {
                     let Some(pts_path) = decode_str(&mut cursor)? else {
                         return Ok(None);
                     };
+                    let connected = match cursor.try_get_u8() {
+                        Ok(c) if c < 2 => c != 0,
+                        Ok(c) => {
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                format!("invalid connected value: {}", c),
+                            ));
+                        }
+                        Err(_) => {
+                            return Ok(None);
+                        }
+                    };
                     connections.push(ConnectionInfo {
                         name,
                         addr,
                         port,
                         pts_path,
+                        connected,
                     });
                 }
                 DaemonResponse::List(connections)

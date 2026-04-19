@@ -190,7 +190,7 @@ async fn handle_daemon_request(
                 DaemonResponse::Error(format!("No connection found with name: {name}"))
             }
         }
-        DaemonRequest::List => DaemonResponse::List(state.list()),
+        DaemonRequest::List => DaemonResponse::List(state.list().await),
         DaemonRequest::Reset { name } => {
             match state
                 .send_hardware_ctl(&name, DeviceControlRequest::Reset)

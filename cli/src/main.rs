@@ -93,9 +93,14 @@ fn handle_response(resp: DaemonResponse) {
                 println!("Active connections:");
                 for info in l {
                     let ip = Ipv4Addr::from(info.addr);
+                    let status = if info.connected {
+                        "[CONNECTED]"
+                    } else {
+                        "[OFFLINE]"
+                    };
                     println!(
-                        "- {}: {}:{} (PTY: {})",
-                        info.name, ip, info.port, info.pts_path
+                        "- {}: {}:{} (PTY: {}) {}",
+                        info.name, ip, info.port, info.pts_path, status
                     );
                 }
             }

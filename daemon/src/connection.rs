@@ -24,6 +24,7 @@ pub enum ConnectionTaskRequest {
         DeviceControlRequest,
         oneshot::Sender<Result<DeviceControlResponse, DeviceControlError>>,
     ),
+    Status(oneshot::Sender<bool>),
 }
 
 pub struct Connection {
@@ -91,6 +92,19 @@ impl Connection {
             return None;
         }
         rx.await.ok()
+    }
+
+    pub async fn get_status(&self) -> bool {
+        let (tx, rx) = oneshot::channel();
+        if self
+            .ctl_req_tx
+            .send(ConnectionTaskRequest::Status(tx))
+            .await
+            .is_err()
+        {
+            return false;
+        }
+        rx.await.unwrap_or(false)
     }
 
     pub fn shutdown(self) {
@@ -259,6 +273,11 @@ impl ConnectionTask {
                         }
                     }
 
+                    Some(ConnectionTaskRequest::Status(tx)) => {
+                        let _ = tx.send(true);
+                        return None;
+                    }
+
                     None => Some(ConnState::ShuttingDown),
                 }
             }
@@ -285,6 +304,9 @@ impl ConnectionTask {
                     match req {
                         Some(ConnectionTaskRequest::HardwareControl(_, tx)) => {
                             let _ = tx.send(Err(DeviceControlError::Unavailable));
+                        }
+                        Some(ConnectionTaskRequest::Status(tx)) => {
+                            let _ = tx.send(false);
                         }
                         None => return Some(ConnState::ShuttingDown),
                     }
@@ -334,6 +356,9 @@ impl ConnectionTask {
                     match req {
                         Some(ConnectionTaskRequest::HardwareControl(_, tx)) => {
                             let _ = tx.send(Err(DeviceControlError::Unavailable));
+                        }
+                        Some(ConnectionTaskRequest::Status(tx)) => {
+                            let _ = tx.send(false);
                         }
                         None => return Some(ConnState::ShuttingDown),
                     }
