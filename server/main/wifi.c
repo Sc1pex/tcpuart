@@ -1,14 +1,43 @@
 #include "wifi.h"
+#include <stddef.h>
 #include "esp_log.h"
 #include "esp_netif_types.h"
 #include "esp_wifi.h"
+#include "esp_wifi_types_generic.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "nvs_flash.h"
+#include "sdkconfig.h"
 
-#define WIFI_SSID CONFIG_ESP_WIFI_SSID
-#define WIFI_PASSWORD CONFIG_ESP_WIFI_PASSWORD
 #define MAX_RETRIES CONFIG_ESP_WIFI_MAX_RETRIES
+
+typedef struct {
+    uint8_t ssid[32];
+    uint8_t password[64];
+} wifi_cred_t;
+
+static const wifi_cred_t s_wifi_networks[] = {
+    // Network 1 is always present
+    { CONFIG_ESP_WIFI_SSID_1, CONFIG_ESP_WIFI_PASSWORD_1 },
+
+// Conditionally compile the rest based on Kconfig definitions
+#ifdef CONFIG_ESP_WIFI_SSID_2
+    { CONFIG_ESP_WIFI_SSID_2, CONFIG_ESP_WIFI_PASSWORD_2 },
+#endif
+
+#ifdef CONFIG_ESP_WIFI_SSID_3
+    { CONFIG_ESP_WIFI_SSID_3, CONFIG_ESP_WIFI_PASSWORD_3 },
+#endif
+
+#ifdef CONFIG_ESP_WIFI_SSID_4
+    { CONFIG_ESP_WIFI_SSID_4, CONFIG_ESP_WIFI_PASSWORD_4 },
+#endif
+
+#ifdef CONFIG_ESP_WIFI_SSID_5
+    { CONFIG_ESP_WIFI_SSID_5, CONFIG_ESP_WIFI_PASSWORD_5 },
+#endif
+};
+static const int s_num_wifi_networks = sizeof(s_wifi_networks) / sizeof(s_wifi_networks[0]);
 
 static const char* TAG = "wifi";
 static EventGroupHandle_t wifi_events;
@@ -16,17 +45,47 @@ static EventGroupHandle_t wifi_events;
 #define FAILED_BIT BIT1
 
 static int s_retry_count = 0;
+static int s_current_wifi_idx = 0;
+static wifi_config_t s_current_config;
+
+static void update_config_and_connect() {
+    memcpy(
+        s_current_config.sta.ssid, s_wifi_networks[s_current_wifi_idx].ssid,
+        sizeof(s_wifi_networks[s_current_wifi_idx].ssid)
+    );
+    memcpy(
+        s_current_config.sta.password, s_wifi_networks[s_current_wifi_idx].password,
+        sizeof(s_wifi_networks[s_current_wifi_idx].password)
+    );
+
+    ESP_LOGI(TAG, "trying to connect to %.32s...", s_current_config.sta.ssid);
+
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &s_current_config));
+    esp_wifi_connect();
+}
+
 static void event_handler(void* arg, esp_event_base_t base, int32_t event_id, void* event_data) {
     if (base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
+        update_config_and_connect();
     } else if (base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_retry_count < MAX_RETRIES) {
-            esp_wifi_connect();
+        s_current_wifi_idx++;
+        if (s_current_wifi_idx >= s_num_wifi_networks) {
+            s_current_wifi_idx = 0;
+
             s_retry_count++;
-            ESP_LOGW(TAG, "retrying... (%d/%d)", s_retry_count, MAX_RETRIES);
-        } else {
-            xEventGroupSetBits(wifi_events, FAILED_BIT);
+            if (s_retry_count == MAX_RETRIES) {
+                xEventGroupSetBits(wifi_events, FAILED_BIT);
+                return;
+            }
+
+            ESP_LOGW(
+                TAG, "tried connecting to all networks. retrying (%d/%d)", s_retry_count,
+                MAX_RETRIES
+            );
         }
+
+        update_config_and_connect();
+
     } else if (base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
         ESP_LOGI(TAG, "got IP: " IPSTR, IP2STR(&event->ip_info.ip));
@@ -57,18 +116,9 @@ void wifi_init() {
         esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL)
     );
 
-    wifi_config_t wifi_config = {
-        .sta = {
-            .ssid     = WIFI_SSID,
-            .password = WIFI_PASSWORD,
-        },
-    };
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
-
-    ESP_LOGI(TAG, "connecting to %s...", WIFI_SSID);
 
     EventBits_t bits = xEventGroupWaitBits(
         wifi_events, CONNECTED_BIT | FAILED_BIT, pdFALSE, pdFALSE, portMAX_DELAY
