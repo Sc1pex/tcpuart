@@ -127,6 +127,8 @@ void wifi_init() {
     if (bits & CONNECTED_BIT) {
         ESP_LOGI(TAG, "connected");
     } else {
-        ESP_LOGE(TAG, "failed to connect");
+        ESP_LOGE(TAG, "failed to connect to any network. Rebooting...");
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        esp_restart();
     }
 }
