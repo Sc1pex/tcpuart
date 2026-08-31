@@ -1,0 +1,82 @@
+menu "Wifi Configuration"
+    config ESP_WIFI_NETWORK_COUNT
+        int "Number of WiFi networks to try"
+        range 1 5
+        default 1
+        help
+            WiFi SSID
+
+    config ESP_WIFI_SSID_1
+        string "WiFi 1 SSID"
+        default "myssid"
+        help
+            WiFi SSID
+
+    config ESP_WIFI_PASSWORD_1
+        string "WiFi 1 Password"
+        default "mypassword"
+        help
+            WiFi password
+
+    if ESP_WIFI_NETWORK_COUNT >= 2
+        config ESP_WIFI_SSID_2
+            string "WiFi 2 SSID"
+            default "myssid"
+            help
+                WiFi SSID
+
+        config ESP_WIFI_PASSWORD_2
+            string "WiFi 2 Password"
+            default "mypassword"
+            help
+                WiFi password
+    endif
+
+    if ESP_WIFI_NETWORK_COUNT >= 3
+        config ESP_WIFI_SSID_3
+            string "WiFi 3 SSID"
+            default "myssid"
+            help
+                WiFi SSID
+
+        config ESP_WIFI_PASSWORD_3
+            string "WiFi 3 Password"
+            default "mypassword"
+            help
+                WiFi password
+    endif
+
+    if ESP_WIFI_NETWORK_COUNT >= 4
+        config ESP_WIFI_SSID_4
+            string "WiFi 4 SSID"
+            default "myssid"
+            help
+                WiFi SSID
+
+        config ESP_WIFI_PASSWORD_4
+            string "WiFi 4 Password"
+            default "mypassword"
+            help
+                WiFi password
+    endif
+
+    if ESP_WIFI_NETWORK_COUNT >= 5
+        config ESP_WIFI_SSID_5
+            string "WiFi 5 SSID"
+            default "myssid"
+            help
+                WiFi SSID
+
+        config ESP_WIFI_PASSWORD_5
+            string "WiFi 5 Password"
+            default "mypassword"
+            help
+                WiFi password
+    endif
+
+    config ESP_WIFI_MAX_RETRIES
+        int "WiFi max retries"
+        default 5
+        help
+            How many times to retry before giving up
+endmenu
