@@ -13,5 +13,9 @@ clap = { workspace = true, features = ["derive", "env"] }
 tracing = {workspace = true }
 tracing-subscriber = {workspace = true, features = ["env-filter"] }
 
+[[bin]]
+name = "tcpuart-daemon"
+path = "src/main.rs"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 tracing-journald = "0.3"

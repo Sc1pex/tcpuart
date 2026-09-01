@@ -82,22 +82,28 @@ idf.py flash monitor
 
 ## Host Tools
 
+### Host Tools
+
+Install both binaries directly from the repository root:
+
+```sh
+cargo install --path cli
+cargo install --path daemon
+```
+
+This compiles both in release mode and places `tcpuart` and `tcpuart-daemon` in `~/.cargo/bin/`, which is already on your `$PATH` if you have a standard Rust installation.
+
 ### Daemon
 
 The daemon manages one or more named connections to ESP32 devices. Each connection gets its own PTY device on the host. It listens on a Unix domain socket for CLI commands.
 
 ```sh
-cargo build --release -p daemon
-./target/release/daemon
+tcpuart-daemon
 ```
 
 The socket path defaults to `/tmp/tcpuart.sock` and can be overridden with the `--socket` flag or the `TCPUART_SOCKET` environment variable. The `RUST_LOG` environment variable controls log output (e.g. `RUST_LOG=info`).
 
 ### CLI
-
-```sh
-cargo build --release -p cli
-```
 
 **Commands:**
 
@@ -130,7 +136,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/daemon
+ExecStart=%h/.cargo/bin/tcpuart-daemon
 Restart=on-failure
 Environment=RUST_LOG=info
 
@@ -158,7 +164,7 @@ Create `~/Library/LaunchAgents/com.tcpuart.daemon.plist`:
     <string>com.tcpuart.daemon</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/daemon</string>
+        <string>/Users/YOUR_USERNAME/.cargo/bin/tcpuart-daemon</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
@@ -178,6 +184,8 @@ Then load it:
 ```sh
 launchctl load ~/Library/LaunchAgents/com.tcpuart.daemon.plist
 ```
+
+> **Note:** launchd does not expand `~` or `$HOME` in plist files, so you must substitute your actual username in the `ProgramArguments` path.
 
 ## Wi-Fi fallback behavior
 
