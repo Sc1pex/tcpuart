@@ -17,4 +17,27 @@ menu "UART Configuration"
         default 16
         help
             GPIO number for the UART RX signal.
+
+    config ESP_UART_HW_FLOW_CTRL
+        bool "Enable Hardware Flow Control (RTS/CTS)"
+        default n
+        help
+            If enabled, uses RTS and CTS pins to prevent buffer overflows during
+            high-speed data transfer. The RTS line is asserted automatically by the
+            hardware when the RX FIFO is nearly full, giving the sender time to stop
+            before the buffer overflows.
+
+    if ESP_UART_HW_FLOW_CTRL
+        config ESP_UART_RTS_PIN
+            int "UART RTS Pin"
+            default 15
+            help
+                GPIO number for the UART RTS (Request To Send) signal.
+
+        config ESP_UART_CTS_PIN
+            int "UART CTS Pin"
+            default 14
+            help
+                GPIO number for the UART CTS (Clear To Send) signal.
+    endif
 endmenu

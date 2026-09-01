@@ -129,7 +129,12 @@ void uart_task(void* pvParamters) {
         .baud_rate = 115200,
         .data_bits = UART_DATA_8_BITS,
         .stop_bits = UART_STOP_BITS_1,
+#ifdef CONFIG_ESP_UART_HW_FLOW_CTRL
+        .flow_ctrl = UART_HW_FLOWCTRL_CTS_RTS,
+        .rx_flow_ctrl_thresh = 120,
+#else
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+#endif
         .source_clk = UART_SCLK_DEFAULT,
         .parity = UART_PARITY_DISABLE,
     };
@@ -139,10 +144,17 @@ void uart_task(void* pvParamters) {
         uart_driver_install(UART_PORT, 1024, 1024, UART_EVENT_QUEUE_SIZE, &uart_event_queue, 0)
     );
     ESP_ERROR_CHECK(uart_param_config(UART_PORT, &cfg));
+#ifdef CONFIG_ESP_UART_HW_FLOW_CTRL
+    ESP_ERROR_CHECK(uart_set_pin(
+        UART_PORT, CONFIG_ESP_UART_TX_PIN, CONFIG_ESP_UART_RX_PIN, CONFIG_ESP_UART_RTS_PIN,
+        CONFIG_ESP_UART_CTS_PIN
+    ));
+#else
     ESP_ERROR_CHECK(uart_set_pin(
         UART_PORT, CONFIG_ESP_UART_TX_PIN, CONFIG_ESP_UART_RX_PIN, UART_PIN_NO_CHANGE,
         UART_PIN_NO_CHANGE
     ));
+#endif
 
     QueueSetHandle_t queue_set = xQueueCreateSet(16 + UART_EVENT_QUEUE_SIZE);
     xQueueAddToSet(uart_event_queue, queue_set);

@@ -43,6 +43,9 @@ All configuration is done through `idf.py menuconfig` under the **TcpUart Server
 | Port number | `2` | UART peripheral to use (UART0 is reserved for console logs) |
 | TX Pin | `17` | GPIO for UART TX |
 | RX Pin | `16` | GPIO for UART RX |
+| Hardware Flow Control | `n` | Enable RTS/CTS flow control to prevent buffer overflows at high baud rates |
+| RTS Pin | `15` | GPIO for UART RTS (only shown when flow control is enabled) |
+| CTS Pin | `14` | GPIO for UART CTS (only shown when flow control is enabled) |
 | **Remote Reset** (optional) | | |
 | Enable | `n` | Allow the host to trigger a hardware reset on the connected device |
 | Reset GPIO | `18` | GPIO connected to the target device's reset pin |
@@ -53,6 +56,16 @@ All configuration is done through `idf.py menuconfig` under the **TcpUart Server
 | GPIO | `48` | LED pin (48 is the built-in LED on the ESP32-S3-DevKitC-1) |
 | Brightness | `20%` | Scale brightness down from the blinding default |
 | UART Activity | `y` | Flash the LED on UART TX/RX data |
+
+### Pin assignment
+
+All GPIO pin numbers are fully configurable via `menuconfig`. The ESP32's internal GPIO Matrix allows any UART signal (TX, RX, RTS, CTS) to be routed to virtually any GPIO pin, so the defaults are just a starting point and can be changed to whatever is convenient for your board or PCB layout.
+
+A few hardware rules to keep in mind when picking pins:
+
+- **Input-only pins (classic ESP32 only):** GPIOs 34, 35, 36, and 39 are input-only and cannot be used for TX or RTS. They are fine for RX or CTS.
+- **Strapping pins:** Some pins are sampled by the chip at boot to determine the boot mode (e.g. GPIO 0, 45, 46 on the ESP32-S3). These can be used for UART, but make sure the connected device doesn't pull them to an unexpected voltage during power-on.
+- **Internal flash pins:** Pins wired internally to the SPI flash must not be used. Consult the datasheet for your specific module.
 
 ### Status LED behavior
 
