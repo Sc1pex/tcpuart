@@ -7,7 +7,7 @@ use tokio_util::codec::{FramedRead, FramedWrite};
 
 #[derive(Parser)]
 struct Cli {
-    #[arg(short, long, default_value = "./tcpuart.sock")]
+    #[arg(short, long, env = "TCPUART_SOCKET", default_value = "/tmp/tcpuart.sock")]
     socket: String,
 
     #[command(subcommand)]

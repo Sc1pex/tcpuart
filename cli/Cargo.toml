@@ -8,4 +8,4 @@ common = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "net"] }
 tokio-util = { workspace = true, features = ["codec"] }
 futures = { workspace = true }
-clap = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = ["derive", "env"] }
