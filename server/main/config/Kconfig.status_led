@@ -20,5 +20,12 @@ menu "Status LED"
             help
                 Sets the maximum brightness of the status LED as a percentage.
                 Addressable LEDs are extremely bright at 100%. A value between 10 and 20 is highly recommended for indoor use.
+
+        config ESP_STATUS_LED_UART_ACTIVITY
+            bool "Flash LED on UART Data Activity"
+            default y
+            help
+                If enabled, the LED will flash rapidly when data is sent or received over UART.
+                Disable this if you find the constant flashing during high data transfer distracting.
     endif
 endmenu

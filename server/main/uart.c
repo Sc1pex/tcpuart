@@ -157,7 +157,7 @@ void uart_task(void* pvParamters) {
                 if (msg.hdr.kind == MESSAGE_KIND_DATA) {
                     uart_write_bytes(UART_PORT, msg.body, msg.hdr.len);
 
-#ifdef CONFIG_ESP_STATUS_LED_ENABLED
+#ifdef CONFIG_ESP_STATUS_LED_UART_ACTIVITY
                     StatusUpdateMessage status_msg = STATUS_UART_SEND;
                     xQueueSend(params->status_update_queue, &status_msg, 0);
 #endif
@@ -202,7 +202,7 @@ void uart_task(void* pvParamters) {
                         }
                         uart_get_buffered_data_len(UART_PORT, &buffered_len);
 
-#ifdef CONFIG_ESP_STATUS_LED_ENABLED
+#ifdef CONFIG_ESP_STATUS_LED_UART_ACTIVITY
                         StatusUpdateMessage status_msg = STATUS_UART_RECV;
                         xQueueSend(params->status_update_queue, &status_msg, 0);
 #endif

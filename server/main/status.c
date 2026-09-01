@@ -50,10 +50,10 @@ void handle_queue_msg(StatusUpdateMessage msg) {
 
     else if (msg == STATUS_UART_SEND) {
         s_red_value = 255;
-        s_red_delay_ms = 50;
+        s_red_delay_ms = 10;
     } else if (msg == STATUS_UART_RECV) {
         s_green_value = 255;
-        s_green_delay_ms = 50;
+        s_green_delay_ms = 10;
     }
 }
 
