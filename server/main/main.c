@@ -3,6 +3,7 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "message.h"
+#include "status.h"
 #include "tcp.h"
 #include "uart.h"
 #include "wifi.h"
@@ -13,6 +14,11 @@ typedef struct {
     int uart_to_tcp_efd;
     UartTaskParams uart_params;
     TcpTaskParams tcp_params;
+
+#ifdef CONFIG_ESP_STATUS_LED_ENABLED
+    QueueHandle_t status_update_queue;
+    StatusTaskParams status_params;
+#endif
 } AppState;
 
 static AppState s_state;
@@ -33,11 +39,27 @@ static void state_init(AppState* state) {
     state->tcp_params.tcp_to_uart_queue = state->tcp_to_uart_queue;
     state->tcp_params.uart_to_tcp_queue = state->uart_to_tcp_queue;
     state->tcp_params.uart_to_tcp_efd = state->uart_to_tcp_efd;
+
+#ifdef CONFIG_ESP_STATUS_LED_ENABLED
+    state->status_update_queue = xQueueCreate(32, sizeof(StatusUpdateMessage));
+
+    state->status_params.status_update_queue = state->status_update_queue;
+
+    state->uart_params.status_update_queue = state->status_update_queue;
+    state->tcp_params.status_update_queue = state->status_update_queue;
+#endif
 }
 void app_main(void) {
     state_init(&s_state);
 
-    wifi_init();
+    WifiParams wifi_params;
+#ifdef CONFIG_ESP_STATUS_LED_ENABLED
+    xTaskCreate(status_led_task, "status_task", 4096, &s_state.status_params, 1, NULL);
+
+    wifi_params.status_update_queue = s_state.status_update_queue;
+#endif
+
+    wifi_init(&wifi_params);
 
     xTaskCreatePinnedToCore(uart_task, "uart_task", 4096, &s_state.uart_params, 5, NULL, 1);
     xTaskCreatePinnedToCore(tcp_task, "tcp_task", 4096, &s_state.tcp_params, 5, NULL, 0);

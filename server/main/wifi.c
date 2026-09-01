@@ -8,6 +8,7 @@
 #include "freertos/event_groups.h"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
+#include "status.h"
 
 #define MAX_RETRIES CONFIG_ESP_WIFI_MAX_RETRIES
 
@@ -48,7 +49,7 @@ static int s_retry_count = 0;
 static int s_current_wifi_idx = 0;
 static wifi_config_t s_current_config;
 
-static void update_config_and_connect() {
+static void update_config_and_connect(WifiParams* params) {
     memcpy(
         s_current_config.sta.ssid, s_wifi_networks[s_current_wifi_idx].ssid,
         sizeof(s_wifi_networks[s_current_wifi_idx].ssid)
@@ -60,14 +61,26 @@ static void update_config_and_connect() {
 
     ESP_LOGI(TAG, "trying to connect to %.32s...", s_current_config.sta.ssid);
 
+#ifdef CONFIG_ESP_STATUS_LED_ENABLED
+    StatusUpdateMessage msg = STATUS_WIFI_CONNECTING;
+    xQueueSend(params->status_update_queue, &msg, portMAX_DELAY);
+#endif
+
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &s_current_config));
     esp_wifi_connect();
 }
 
 static void event_handler(void* arg, esp_event_base_t base, int32_t event_id, void* event_data) {
+    WifiParams* params = (WifiParams*) arg;
+
     if (base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        update_config_and_connect();
+        update_config_and_connect(params);
     } else if (base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+#ifdef CONFIG_ESP_STATUS_LED_ENABLED
+        StatusUpdateMessage msg = STATUS_WIFI_CONNECTION_FAILED;
+        xQueueSend(params->status_update_queue, &msg, portMAX_DELAY);
+#endif
+
         s_current_wifi_idx++;
         if (s_current_wifi_idx >= s_num_wifi_networks) {
             s_current_wifi_idx = 0;
@@ -84,7 +97,7 @@ static void event_handler(void* arg, esp_event_base_t base, int32_t event_id, vo
             );
         }
 
-        update_config_and_connect();
+        update_config_and_connect(params);
 
     } else if (base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
@@ -94,7 +107,7 @@ static void event_handler(void* arg, esp_event_base_t base, int32_t event_id, vo
     }
 }
 
-void wifi_init() {
+void wifi_init(WifiParams* params) {
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -111,9 +124,11 @@ void wifi_init() {
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL));
     ESP_ERROR_CHECK(
-        esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL)
+        esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, params)
+    );
+    ESP_ERROR_CHECK(
+        esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, params)
     );
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
@@ -126,8 +141,20 @@ void wifi_init() {
 
     if (bits & CONNECTED_BIT) {
         ESP_LOGI(TAG, "connected");
+
+#ifdef CONFIG_ESP_STATUS_LED_ENABLED
+        StatusUpdateMessage msg = STATUS_WIFI_CONNECTED;
+        xQueueSend(params->status_update_queue, &msg, portMAX_DELAY);
+#endif
+
     } else {
         ESP_LOGE(TAG, "failed to connect to any network. Rebooting...");
+
+#ifdef CONFIG_ESP_STATUS_LED_ENABLED
+        StatusUpdateMessage msg = STATUS_WIFI_RETRIES_FAILED;
+        xQueueSend(params->status_update_queue, &msg, portMAX_DELAY);
+#endif
+
         vTaskDelay(pdMS_TO_TICKS(5000));
         esp_restart();
     }
