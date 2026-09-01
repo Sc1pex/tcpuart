@@ -1,0 +1,24 @@
+menu "Status LED"
+    config ESP_STATUS_LED_ENABLED
+        bool "Enable RGB LED status indicator"
+        default n
+        help 
+            If enabled, a WS2812B (NeoPixel) LED will be used to visually indicate the current status of the ESP32 (e.g., Wi-Fi connecting, connected, errors).
+
+    if ESP_STATUS_LED_ENABLED
+        config ESP_STATUS_LED_GPIO
+            int "The GPIO pin of the LED"
+            default 48
+            help
+                The GPIO pin connected to the addressable RGB LED.
+                Default is 48, which is the built-in NeoPixel on the ESP32-S3-DevKitC-1.
+
+        config ESP_STATUS_LED_BRIGHTNESS
+            int "LED Brightness (1-100)"
+            range 1 100
+            default 20
+            help
+                Sets the maximum brightness of the status LED as a percentage.
+                Addressable LEDs are extremely bright at 100%. A value between 10 and 20 is highly recommended for indoor use.
+    endif
+endmenu
