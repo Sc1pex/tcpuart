@@ -41,7 +41,7 @@ static void state_init(AppState* state) {
     state->tcp_params.uart_to_tcp_efd = state->uart_to_tcp_efd;
 
 #ifdef CONFIG_ESP_STATUS_LED_ENABLED
-    state->status_update_queue = xQueueCreate(32, sizeof(StatusUpdateMessage));
+    state->status_update_queue = xQueueCreate(2, sizeof(StatusUpdateMessage));
 
     state->status_params.status_update_queue = state->status_update_queue;
 

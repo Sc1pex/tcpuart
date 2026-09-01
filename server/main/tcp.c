@@ -6,6 +6,7 @@
 #include "freertos/queue.h"
 #include "lwip/sockets.h"
 #include "message.h"
+#include "status.h"
 
 #define PORT CONFIG_ESP_TCP_SERVER_PORT
 
@@ -133,7 +134,17 @@ void tcp_task(void* pvParamters) {
             continue;
         }
 
+#ifdef CONFIG_ESP_STATUS_LED_ENABLED
+        StatusUpdateMessage msg = STATUS_TCP_CLIENT_CONNECTED;
+        xQueueSend(params->status_update_queue, &msg, 0);
+#endif
+
         ESP_LOGI(TAG, "client connected: " IPSTR, IP2STR((ip4_addr_t*) &client_addr.sin_addr));
         handle_client(client_sock, params);
+
+#ifdef CONFIG_ESP_STATUS_LED_ENABLED
+        msg = STATUS_TCP_CLIENT_DISCONNECTED;
+        xQueueSend(params->status_update_queue, &msg, 0);
+#endif
     }
 }

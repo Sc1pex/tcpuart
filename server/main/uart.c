@@ -8,6 +8,7 @@
 #include "freertos/task.h"
 #include "lwip/sockets.h"
 #include "message.h"
+#include "status.h"
 
 static const char* TAG = "uart";
 
@@ -155,6 +156,12 @@ void uart_task(void* pvParamters) {
             while (xQueueReceive(params->tcp_to_uart_queue, &msg, 0) == pdTRUE) {
                 if (msg.hdr.kind == MESSAGE_KIND_DATA) {
                     uart_write_bytes(UART_PORT, msg.body, msg.hdr.len);
+
+#ifdef CONFIG_ESP_STATUS_LED_ENABLED
+                    StatusUpdateMessage status_msg = STATUS_UART_SEND;
+                    xQueueSend(params->status_update_queue, &status_msg, 0);
+#endif
+
                 } else if (msg.hdr.kind == MESSAGE_KIND_CONFIG) {
                     if (msg.hdr.len != sizeof(ConfigMessage)) {
                         ESP_LOGE(TAG, "invalid config message length: %d", msg.hdr.len);
@@ -194,6 +201,11 @@ void uart_task(void* pvParamters) {
                             write(params->uart_to_tcp_efd, &val, sizeof(val));
                         }
                         uart_get_buffered_data_len(UART_PORT, &buffered_len);
+
+#ifdef CONFIG_ESP_STATUS_LED_ENABLED
+                        StatusUpdateMessage status_msg = STATUS_UART_RECV;
+                        xQueueSend(params->status_update_queue, &status_msg, 0);
+#endif
                     }
                 }
             }

@@ -63,7 +63,7 @@ static void update_config_and_connect(WifiParams* params) {
 
 #ifdef CONFIG_ESP_STATUS_LED_ENABLED
     StatusUpdateMessage msg = STATUS_WIFI_CONNECTING;
-    xQueueSend(params->status_update_queue, &msg, portMAX_DELAY);
+    xQueueSend(params->status_update_queue, &msg, 0);
 #endif
 
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &s_current_config));
@@ -78,7 +78,7 @@ static void event_handler(void* arg, esp_event_base_t base, int32_t event_id, vo
     } else if (base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
 #ifdef CONFIG_ESP_STATUS_LED_ENABLED
         StatusUpdateMessage msg = STATUS_WIFI_CONNECTION_FAILED;
-        xQueueSend(params->status_update_queue, &msg, portMAX_DELAY);
+        xQueueSend(params->status_update_queue, &msg, 0);
 #endif
 
         s_current_wifi_idx++;
@@ -144,7 +144,7 @@ void wifi_init(WifiParams* params) {
 
 #ifdef CONFIG_ESP_STATUS_LED_ENABLED
         StatusUpdateMessage msg = STATUS_WIFI_CONNECTED;
-        xQueueSend(params->status_update_queue, &msg, portMAX_DELAY);
+        xQueueSend(params->status_update_queue, &msg, 0);
 #endif
 
     } else {
@@ -152,7 +152,7 @@ void wifi_init(WifiParams* params) {
 
 #ifdef CONFIG_ESP_STATUS_LED_ENABLED
         StatusUpdateMessage msg = STATUS_WIFI_RETRIES_FAILED;
-        xQueueSend(params->status_update_queue, &msg, portMAX_DELAY);
+        xQueueSend(params->status_update_queue, &msg, 0);
 #endif
 
         vTaskDelay(pdMS_TO_TICKS(5000));
