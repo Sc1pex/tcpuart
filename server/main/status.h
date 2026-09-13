@@ -14,6 +14,8 @@ typedef enum {
 
     STATUS_UART_SEND,
     STATUS_UART_RECV,
+
+    STATUS_REMOTE_RESET,
 } StatusUpdateMessage;
 
 typedef struct {

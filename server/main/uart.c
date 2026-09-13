@@ -90,6 +90,12 @@ static void handle_control(const ControlMessage* ctrl, UartTaskParams* params) {
     if (ctrl->command == CONTROL_CMD_RESET) {
 #ifdef CONFIG_ESP_UART_RESET_ENABLED
         ESP_LOGI(TAG, "Performing remote reset on GPIO %d", RESET_PIN);
+#ifdef CONFIG_ESP_STATUS_LED_ENABLED
+        if (params->status_update_queue) {
+            StatusUpdateMessage status_msg = STATUS_REMOTE_RESET;
+            xQueueSend(params->status_update_queue, &status_msg, 0);
+        }
+#endif
         gpio_set_level(RESET_PIN, RESET_ACTIVE_LEVEL);
         vTaskDelay(pdMS_TO_TICKS(CONFIG_ESP_UART_RESET_DURATION_MS));
         gpio_set_level(RESET_PIN, RESET_INACTIVE_LEVEL);
