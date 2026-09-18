@@ -29,7 +29,12 @@ mod tcp_bridge;
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Path to the unix socket
-    #[arg(short, long, env = "TCPUART_SOCKET", default_value = "/tmp/tcpuart.sock")]
+    #[arg(
+        short,
+        long,
+        env = "TCPUART_SOCKET",
+        default_value = "/tmp/tcpuart.sock"
+    )]
     socket: String,
 }
 
