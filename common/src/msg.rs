@@ -15,6 +15,7 @@ pub enum DeviceMessage {
         data_bits: u8,
         stop_bits: u8,
         parity: u8,
+        hw_flow_ctl: bool,
     },
     ControlReq(DeviceControlRequest),
     ControlRes(DeviceControlResponse),
@@ -72,7 +73,7 @@ impl DeviceMessage {
     fn data_size(&self) -> usize {
         match self {
             DeviceMessage::Data(len, _) => *len as usize,
-            DeviceMessage::Config { .. } => 7,
+            DeviceMessage::Config { .. } => 8,
             DeviceMessage::ControlReq(_) => 1,
             DeviceMessage::ControlRes(_) => 1,
         }
@@ -108,11 +109,13 @@ impl Encoder<DeviceMessage> for DeviceCodec {
                 data_bits,
                 stop_bits,
                 parity,
+                hw_flow_ctl,
             } => {
                 dst.put_u32(baudrate);
                 dst.put_u8(data_bits);
                 dst.put_u8(stop_bits);
                 dst.put_u8(parity);
+                dst.put_u8(hw_flow_ctl as u8);
                 Ok(())
             }
             DeviceMessage::ControlReq(req) => {
@@ -166,11 +169,21 @@ impl Decoder for DeviceCodec {
                 let Ok(parity) = cursor.try_get_u8() else {
                     return Ok(None);
                 };
+                let Ok(hw_flow_ctl) = cursor.try_get_u8() else {
+                    return Ok(None);
+                };
+                if hw_flow_ctl > 1 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Hardware flow control is not a bool",
+                    ));
+                }
                 DeviceMessage::Config {
                     baudrate,
                     data_bits,
                     stop_bits,
                     parity,
+                    hw_flow_ctl: hw_flow_ctl != 0,
                 }
             }
             3 => {

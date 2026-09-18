@@ -167,7 +167,8 @@ impl ConnectionTask {
                             baudrate: c.baudrate,
                             data_bits: c.data_bits,
                             stop_bits: c.stop_bits,
-                            parity: c.parity
+                            parity: c.parity,
+                            hw_flow_ctl: c.hw_flow_ctl,
                         };
                         match self.tcp.send(msg).await {
                             TcpBridgeStatus::Ok(()) => None,

@@ -24,6 +24,7 @@ pub struct TermiosChange {
     pub data_bits: u8,
     pub parity: u8,
     pub stop_bits: u8,
+    pub hw_flow_ctl: bool,
 }
 
 pub enum PtyReadResult {
@@ -113,6 +114,7 @@ impl AsyncPty {
                                 data_bits = change.data_bits,
                                 parity = change.parity,
                                 stop_bits = change.stop_bits,
+                                hw_flow_ctl = change.hw_flow_ctl,
                                 "detected termios change from pty"
                             );
                             return Ok(PtyReadResult::TermiosChange(change));
@@ -226,12 +228,14 @@ fn get_termios_change(tio: &termios::Termios) -> TermiosChange {
     } else {
         1
     };
+    let hw_flow_ctl = tio.control_flags.contains(termios::ControlFlags::CRTSCTS);
 
     TermiosChange {
         baudrate,
         data_bits,
         parity,
         stop_bits,
+        hw_flow_ctl,
     }
 }
 
@@ -274,6 +278,12 @@ fn check_termios_change(old: &termios::Termios, new: &termios::Termios) -> bool 
     let new_parity =
         new.control_flags & (termios::ControlFlags::PARENB | termios::ControlFlags::PARODD);
     if old_parity != new_parity {
+        return true;
+    }
+
+    let old_hw_flow_ctl = old.control_flags & termios::ControlFlags::CRTSCTS;
+    let new_hw_flow_ctl = new.control_flags & termios::ControlFlags::CRTSCTS;
+    if old_hw_flow_ctl != new_hw_flow_ctl {
         return true;
     }
 

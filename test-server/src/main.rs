@@ -60,8 +60,8 @@ async fn handle_conn(
                     Ok(DeviceMessage::Data(size, data)) => {
                         info!(data = ?String::from_utf8_lossy(&data[..size as usize]), "received data message");
                     }
-                    Ok(DeviceMessage::Config{ baudrate, data_bits, stop_bits, parity }) => {
-                        info!(baudrate, data_bits, stop_bits, parity = ?parity, "received config message");
+                    Ok(DeviceMessage::Config{ baudrate, data_bits, stop_bits, parity, hw_flow_ctl }) => {
+                        info!(baudrate, data_bits, stop_bits, parity = ?parity, hw_flow_ctl, "received config message");
                     }
                     Ok(DeviceMessage::ControlReq(cmd)) => {
                         info!(?cmd, "received control request");

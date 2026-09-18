@@ -1,6 +1,7 @@
 #include "uart.h"
 #include "driver/gpio.h"
 #include "driver/uart.h"
+#include "esp_err.h"
 #include "esp_log.h"
 #include "esp_vfs.h"
 #include "freertos/FreeRTOS.h"
@@ -79,6 +80,14 @@ void apply_config(const ConfigMessage* config) {
         ESP_LOGE(TAG, "invalid parity: %d", config->parity);
         break;
     }
+
+#ifdef CONFIG_ESP_UART_ALLOW_HW_FLOW_CTRL
+    if (config->hw_flow_ctl) {
+        ESP_ERROR_CHECK(uart_set_hw_flow_ctrl(UART_PORT, UART_HW_FLOWCTRL_CTS_RTS, 120));
+    } else {
+        ESP_ERROR_CHECK(uart_set_hw_flow_ctrl(UART_PORT, UART_HW_FLOWCTRL_DISABLE, 120));
+    }
+#endif
 }
 
 static void handle_control(const ControlMessage* ctrl, UartTaskParams* params) {
@@ -135,12 +144,7 @@ void uart_task(void* pvParamters) {
         .baud_rate = 115200,
         .data_bits = UART_DATA_8_BITS,
         .stop_bits = UART_STOP_BITS_1,
-#ifdef CONFIG_ESP_UART_HW_FLOW_CTRL
-        .flow_ctrl = UART_HW_FLOWCTRL_CTS_RTS,
-        .rx_flow_ctrl_thresh = 120,
-#else
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-#endif
         .source_clk = UART_SCLK_DEFAULT,
         .parity = UART_PARITY_DISABLE,
     };
@@ -150,7 +154,7 @@ void uart_task(void* pvParamters) {
         uart_driver_install(UART_PORT, 1024, 1024, UART_EVENT_QUEUE_SIZE, &uart_event_queue, 0)
     );
     ESP_ERROR_CHECK(uart_param_config(UART_PORT, &cfg));
-#ifdef CONFIG_ESP_UART_HW_FLOW_CTRL
+#ifdef CONFIG_ESP_UART_ALLOW_HW_FLOW_CTRL
     ESP_ERROR_CHECK(uart_set_pin(
         UART_PORT, CONFIG_ESP_UART_TX_PIN, CONFIG_ESP_UART_RX_PIN, CONFIG_ESP_UART_RTS_PIN,
         CONFIG_ESP_UART_CTS_PIN

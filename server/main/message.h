@@ -26,6 +26,7 @@ typedef struct __attribute__((packed)) {
     uint8_t data_bits;
     uint8_t stop_bits;
     uint8_t parity;
+    uint8_t hw_flow_ctl;
 } ConfigMessage;
 
 typedef struct __attribute__((packed)) {
@@ -40,4 +41,3 @@ typedef struct __attribute__((packed)) {
 
 #define RESPONSE_STATUS_OK 1
 #define RESPONSE_STATUS_NOT_SUPPORTED 2
-
