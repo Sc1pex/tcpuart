@@ -6,6 +6,7 @@ menu "TcpUart Server Configuration"
             Port number to listen on
 
     rsource "config/Kconfig.wifi"
+    rsource "config/Kconfig.tailscale"
     rsource "config/Kconfig.reset"
     rsource "config/Kconfig.uart"
     rsource "config/Kconfig.status_led"

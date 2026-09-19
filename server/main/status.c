@@ -59,6 +59,24 @@ void handle_queue_msg(StatusUpdateMessage msg) {
         s_blue_value = 255;
         s_red_delay_ms = CONFIG_ESP_UART_RESET_DURATION_MS;
         s_blue_delay_ms = CONFIG_ESP_UART_RESET_DURATION_MS;
+    } else if (msg == STATUS_TAILSCALE_CONNECTING) {
+        s_red_value = 0;
+        s_green_value = 255;
+        s_blue_value = 255;
+        s_green_delay_ms = 500;
+        s_blue_delay_ms = 500;
+    } else if (msg == STATUS_TAILSCALE_CONNECTED) {
+        s_red_value = 0;
+        s_green_value = 255;
+        s_blue_value = 255;
+        s_green_delay_ms = 1500;
+        s_blue_delay_ms = 1500;
+    } else if (msg == STATUS_TAILSCALE_FAILED) {
+        s_red_value = 255;
+        s_green_value = 0;
+        s_blue_value = 255;
+        s_red_delay_ms = 3000;
+        s_blue_delay_ms = 3000;
     }
 }
 

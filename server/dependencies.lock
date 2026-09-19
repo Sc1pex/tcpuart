@@ -13,9 +13,27 @@ dependencies:
     source:
       type: idf
     version: 5.5.4
+  microlink:
+    component_hash: c7816e9bbbf9382dbfe6419247a1d8e5c303b3f88b03e138baacabcd6ee9638a
+    dependencies: []
+    source:
+      git: https://github.com/CamM2325/microlink.git
+      path: components/microlink
+      type: git
+    version: 216da3300f0493b0860247d43f7af5ce29df63a5
+  wireguard_lwip:
+    component_hash: 60b2f3335e06c3c2173db1860cd57fd98af532783e2f33b00caed069a85f3f60
+    dependencies: []
+    source:
+      git: https://github.com/CamM2325/microlink.git
+      path: components/microlink/components/wireguard_lwip
+      type: git
+    version: 216da3300f0493b0860247d43f7af5ce29df63a5
 direct_dependencies:
 - espressif/led_strip
 - idf
-manifest_hash: 66f0d1a5019d1277f845b61ed7ecd51b2f8a000d6fb5b32b40131928bf590fba
+- microlink
+- wireguard_lwip
+manifest_hash: b67676ad8308bed4cc349cbcf16b192826897e13ce8a7bce8c3ec6e9761e789f
 target: esp32s3
 version: 2.0.0

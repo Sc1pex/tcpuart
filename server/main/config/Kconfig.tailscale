@@ -1,0 +1,21 @@
+menu "Tailscale Configuration"
+    config ESP_TAILSCALE_ENABLED
+        bool "Enable Tailscale VPN (MicroLink)"
+        default n
+        help
+            Connects the ESP32 directly to a Tailscale network using MicroLink.
+
+    if ESP_TAILSCALE_ENABLED
+        config ESP_TAILSCALE_AUTH_KEY
+            string "Tailscale Auth Key"
+            default ""
+            help
+                Reusable authentication key from your Tailscale (or Headscale) admin panel.
+
+        config ESP_TAILSCALE_DEVICE_NAME
+            string "Device Name"
+            default "tcpuart-esp32"
+            help
+                Hostname for this device on your Tailnet.
+    endif
+endmenu

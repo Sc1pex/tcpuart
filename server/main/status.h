@@ -16,6 +16,10 @@ typedef enum {
     STATUS_UART_RECV,
 
     STATUS_REMOTE_RESET,
+
+    STATUS_TAILSCALE_CONNECTING,
+    STATUS_TAILSCALE_CONNECTED,
+    STATUS_TAILSCALE_FAILED,
 } StatusUpdateMessage;
 
 typedef struct {

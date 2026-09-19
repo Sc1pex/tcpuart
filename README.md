@@ -39,6 +39,10 @@ All configuration is done through `idf.py menuconfig` under the **TcpUart Server
 | Number of networks | `1` | How many fallback Wi-Fi networks to configure (up to 5) |
 | SSID / Password | — | Credentials for each configured network, tried in order |
 | Max retries | `5` | Full cycles through all configured networks before rebooting |
+| **Tailscale** (optional) | | |
+| Enable | `n` | Connect ESP32 directly to a Tailnet via MicroLink |
+| Auth Key | — | Reusable Tailscale / Headscale authentication key |
+| Device Name | `tcpuart-esp32` | Hostname registered on your Tailnet |
 | **UART** | | |
 | Port number | `2` | UART peripheral to use (UART0 is reserved for console logs) |
 | TX Pin | `17` | GPIO for UART TX |
@@ -77,6 +81,9 @@ If the status LED is enabled, it uses the following color scheme:
 | Wi-Fi connection failed (one network) | Red | Single flash |
 | All Wi-Fi networks exhausted | Red | Solid for 3 seconds, then reboot |
 | Wi-Fi connected (got IP) | Green | Single flash |
+| Connecting to Tailscale network | Cyan | Single flash (500ms) |
+| Tailscale connected | Cyan | Long flash (1.5s) |
+| Tailscale connection failed | Magenta / Red | Solid for 3 seconds, then reboot |
 | TCP client connected | Blue | Single flash |
 | TCP client disconnected | Blue | Single flash |
 | Remote reset pin held | Purple | Solid while held |
