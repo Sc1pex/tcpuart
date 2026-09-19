@@ -124,8 +124,15 @@ static void handle_control(const ControlMessage* ctrl, UartTaskParams* params) {
     }
 }
 
-void uart_task(void* pvParamters) {
-    UartTaskParams* params = (UartTaskParams*) pvParamters;
+/*
+ * uart_rx_task: reads UART hardware events and forwards data to tcp_task via
+ * uart_to_tcp_queue. This task never blocks waiting on the queue — it only
+ * blocks on the UART event queue itself, so UART hardware is always drained
+ * promptly regardless of TCP/VPN backpressure. The queue depth must be large
+ * enough to absorb worst-case VPN jitter without filling up.
+ */
+void uart_rx_task(void* pvParameters) {
+    UartTaskParams* params = (UartTaskParams*) pvParameters;
 
 #ifdef CONFIG_ESP_UART_RESET_ENABLED
     gpio_config_t reset_gpio_cfg = {
@@ -166,71 +173,77 @@ void uart_task(void* pvParamters) {
     ));
 #endif
 
-    QueueSetHandle_t queue_set = xQueueCreateSet(16 + UART_EVENT_QUEUE_SIZE);
-    xQueueAddToSet(uart_event_queue, queue_set);
-    xQueueAddToSet(params->tcp_to_uart_queue, queue_set);
-
     while (1) {
-        QueueSetMemberHandle_t active_queue = xQueueSelectFromSet(queue_set, portMAX_DELAY);
+        uart_event_t event;
+        if (xQueueReceive(uart_event_queue, &event, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
 
-        if (active_queue == params->tcp_to_uart_queue) {
-            Message msg;
-            while (xQueueReceive(params->tcp_to_uart_queue, &msg, 0) == pdTRUE) {
-                if (msg.hdr.kind == MESSAGE_KIND_DATA) {
-                    uart_write_bytes(UART_PORT, msg.body, msg.hdr.len);
+        if (event.type == UART_DATA) {
+            size_t buffered_len;
+            uart_get_buffered_data_len(UART_PORT, &buffered_len);
+
+            while (buffered_len > 0) {
+                Message msg;
+                msg.hdr.kind = MESSAGE_KIND_DATA;
+                size_t to_read = (buffered_len > MAX_MESSAGE_BODY_SIZE)
+                                     ? MAX_MESSAGE_BODY_SIZE
+                                     : buffered_len;
+
+                int len = uart_read_bytes(UART_PORT, msg.body, to_read, 0);
+                if (len > 0) {
+                    msg.hdr.len = len;
+                    xQueueSend(params->uart_to_tcp_queue, &msg, portMAX_DELAY);
+
+                    uint64_t val = 1;
+                    write(params->uart_to_tcp_efd, &val, sizeof(val));
 
 #ifdef CONFIG_ESP_STATUS_LED_UART_ACTIVITY
-                    StatusUpdateMessage status_msg = STATUS_UART_SEND;
+                    StatusUpdateMessage status_msg = STATUS_UART_RECV;
                     xQueueSend(params->status_update_queue, &status_msg, 0);
 #endif
-
-                } else if (msg.hdr.kind == MESSAGE_KIND_CONFIG) {
-                    if (msg.hdr.len != sizeof(ConfigMessage)) {
-                        ESP_LOGE(TAG, "invalid config message length: %d", msg.hdr.len);
-                        continue;
-                    }
-                    ConfigMessage* config = (ConfigMessage*) msg.body;
-                    apply_config(config);
-                } else if (msg.hdr.kind == MESSAGE_KIND_CONTROL) {
-                    if (msg.hdr.len != sizeof(ControlMessage)) {
-                        ESP_LOGE(TAG, "invalid control message length: %d", msg.hdr.len);
-                        continue;
-                    }
-                    ControlMessage* ctrl = (ControlMessage*) msg.body;
-                    handle_control(ctrl, params);
                 }
+                uart_get_buffered_data_len(UART_PORT, &buffered_len);
             }
-        } else if (active_queue == uart_event_queue) {
-            uart_event_t event;
-            if (xQueueReceive(uart_event_queue, &event, 0) == pdTRUE) {
-                if (event.type == UART_DATA) {
-                    size_t buffered_len;
-                    uart_get_buffered_data_len(UART_PORT, &buffered_len);
+        }
+    }
+}
 
-                    while (buffered_len > 0) {
-                        Message msg;
-                        msg.hdr.kind = MESSAGE_KIND_DATA;
-                        size_t to_read = (buffered_len > MAX_MESSAGE_BODY_SIZE)
-                                             ? MAX_MESSAGE_BODY_SIZE
-                                             : buffered_len;
+/*
+ * uart_tx_task: drains tcp_to_uart_queue and writes data to the UART
+ * hardware. Also handles config and control messages. UART writes are fast
+ * (hardware-buffered), so this task stays responsive and never backs up
+ * tcp_task.
+ */
+void uart_tx_task(void* pvParameters) {
+    UartTaskParams* params = (UartTaskParams*) pvParameters;
 
-                        int len = uart_read_bytes(UART_PORT, msg.body, to_read, 0);
-                        if (len > 0) {
-                            msg.hdr.len = len;
-                            xQueueSend(params->uart_to_tcp_queue, &msg, portMAX_DELAY);
+    while (1) {
+        Message msg;
+        xQueueReceive(params->tcp_to_uart_queue, &msg, portMAX_DELAY);
 
-                            uint64_t val = 1;
-                            write(params->uart_to_tcp_efd, &val, sizeof(val));
-                        }
-                        uart_get_buffered_data_len(UART_PORT, &buffered_len);
+        if (msg.hdr.kind == MESSAGE_KIND_DATA) {
+            uart_write_bytes(UART_PORT, msg.body, msg.hdr.len);
 
 #ifdef CONFIG_ESP_STATUS_LED_UART_ACTIVITY
-                        StatusUpdateMessage status_msg = STATUS_UART_RECV;
-                        xQueueSend(params->status_update_queue, &status_msg, 0);
+            StatusUpdateMessage status_msg = STATUS_UART_SEND;
+            xQueueSend(params->status_update_queue, &status_msg, 0);
 #endif
-                    }
-                }
+
+        } else if (msg.hdr.kind == MESSAGE_KIND_CONFIG) {
+            if (msg.hdr.len != sizeof(ConfigMessage)) {
+                ESP_LOGE(TAG, "invalid config message length: %d", msg.hdr.len);
+                continue;
             }
+            ConfigMessage* config = (ConfigMessage*) msg.body;
+            apply_config(config);
+        } else if (msg.hdr.kind == MESSAGE_KIND_CONTROL) {
+            if (msg.hdr.len != sizeof(ControlMessage)) {
+                ESP_LOGE(TAG, "invalid control message length: %d", msg.hdr.len);
+                continue;
+            }
+            ControlMessage* ctrl = (ControlMessage*) msg.body;
+            handle_control(ctrl, params);
         }
     }
 }

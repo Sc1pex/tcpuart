@@ -69,7 +69,7 @@ void handle_client(int client_sock, TcpTaskParams* params) {
                 ESP_LOGE(TAG, "failed to read message from client");
                 break;
             }
-            if (xQueueSend(params->tcp_to_uart_queue, &msg, 0) != pdTRUE) {
+            if (xQueueSend(params->tcp_to_uart_queue, &msg, portMAX_DELAY) != pdTRUE) {
                 ESP_LOGE(TAG, "Failed to send message to UART queue");
             }
         }

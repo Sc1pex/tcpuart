@@ -36,7 +36,8 @@ static void state_init(AppState* state) {
     ESP_ERROR_CHECK(esp_vfs_eventfd_register(&cfg));
 
     state->tcp_to_uart_queue = xQueueCreate(16, sizeof(Message));
-    state->uart_to_tcp_queue = xQueueCreate(16, sizeof(Message));
+    // Depth 128 absorbs VPN jitter bursts without stalling uart_rx_task.
+    state->uart_to_tcp_queue = xQueueCreate(128, sizeof(Message));
     state->uart_to_tcp_efd = eventfd(0, 0);
 
     // Initialize task parameters with the shared resources
@@ -123,6 +124,7 @@ void app_main(void) {
 #endif
 #endif
 
-    xTaskCreatePinnedToCore(uart_task, "uart_task", 4096, &s_state.uart_params, 10, NULL, 1);
-    xTaskCreatePinnedToCore(tcp_task, "tcp_task", 4096, &s_state.tcp_params, 10, NULL, 0);
+    xTaskCreatePinnedToCore(uart_rx_task, "uart_rx_task", 4096, &s_state.uart_params, 8, NULL, 1);
+    xTaskCreatePinnedToCore(uart_tx_task, "uart_tx_task", 4096, &s_state.uart_params, 8, NULL, 1);
+    xTaskCreatePinnedToCore(tcp_task, "tcp_task", 4096, &s_state.tcp_params, 5, NULL, 0);
 }

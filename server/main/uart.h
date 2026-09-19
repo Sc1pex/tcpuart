@@ -13,4 +13,5 @@ typedef struct {
 #endif
 } UartTaskParams;
 
-void uart_task(void* pvParameters);
+void uart_rx_task(void* pvParameters);
+void uart_tx_task(void* pvParameters);
