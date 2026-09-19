@@ -16,8 +16,8 @@ dependencies:
   #   public: true
   espressif/led_strip: '*'
   microlink:
-    git: https://github.com/CamM2325/microlink.git
+    git: https://github.com/Sc1pex/microlink.git
     path: components/microlink
   wireguard_lwip:
-    git: https://github.com/CamM2325/microlink.git
+    git: https://github.com/Sc1pex/microlink.git
     path: components/microlink/components/wireguard_lwip
