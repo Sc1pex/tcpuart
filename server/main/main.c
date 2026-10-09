@@ -12,9 +12,9 @@
 
 #ifdef CONFIG_ESP_TAILSCALE_ENABLED
 #include "microlink.h"
-#endif
 
 static const char* TAG = "main";
+#endif
 
 typedef struct {
     QueueHandle_t tcp_to_uart_queue;
